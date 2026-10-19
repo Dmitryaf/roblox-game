@@ -1,50 +1,15 @@
 {
-  "name": "WarlockSlice",
+  "name": "ControlMatch",
   "tree": {
     "$className": "DataModel",
-    "ReplicatedStorage": {
-      "Shared": {
-        "$path": "src/shared"
-      }
-    },
-    "ServerScriptService": {
-      "Game": {
-        "$path": "src/server"
-      }
-    },
+    "ReplicatedStorage": {"Shared": {"$path": "src/shared"}},
+    "ServerScriptService": {"Game": {"$path": "src/server"}},
     "StarterPlayer": {
-      "$properties": {
-        "CharacterWalkSpeed": 16,
-        "CameraMaxZoomDistance": 28,
-        "CameraMinZoomDistance": 8
-      },
-      "StarterPlayerScripts": {
-        "Game": {
-          "$path": "src/client"
-        }
-      }
+      "$properties": {"CharacterWalkSpeed": 16, "CameraMaxZoomDistance": 28, "CameraMinZoomDistance": 8},
+      "StarterPlayerScripts": {"Game": {"$path": "src/client"}}
     },
-    "Workspace": {
-      "$properties": {
-        "Gravity": 196.2,
-        "StreamingEnabled": false
-      }
-    },
-    "Lighting": {
-      "$properties": {
-        "ClockTime": 17,
-        "Brightness": 2,
-        "Ambient": [
-          0.25,
-          0.22,
-          0.32
-        ]
-      }
-    },
-    "SoundService": {
-      "$properties": {
-        "RespectFilteringEnabled": true
-      }
-    }
+    "Workspace": {"$properties": {"Gravity": 196.2, "StreamingEnabled": false}},
+    "Lighting": {"$properties": {"ClockTime": 17, "Brightness": 2, "Ambient": [0.25, 0.22, 0.32]}},
+    "SoundService": {"$properties": {"RespectFilteringEnabled": true}}
   }
 }
