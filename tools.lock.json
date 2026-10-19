@@ -1,0 +1,6 @@
+{
+  "rojo": {"version":"7.7.1","url":"https://github.com/rojo-rbx/rojo/releases/download/v7.7.1/rojo-7.7.1-windows-x86_64.zip","sha256":"D4DFA3493A1613A43FC87312D6DAC660D7C8BF38E6A99AA5DCD0D26154BA0B82"},
+  "lune": {"version":"0.11.0","url":"https://github.com/lune-org/lune/releases/download/v0.11.0/lune-0.11.0-windows-x86_64.zip","sha256":"05DE2B841A31653531611D0217AAC553F165BB69732225F95056651E2D668F3B"},
+  "luau-lsp": {"version":"1.70.1","url":"https://github.com/JohnnyMorganz/luau-lsp/releases/download/1.70.1/luau-lsp-win64.zip","sha256":"64225B9738102A30DE6EE09FB28E5A3827EDC402ECF2A6364AF570312468159F"},
+  "robloxTypes": {"version":"8e8a4e745c814ee8d3dd1cea8980901cb27a6970","url":"https://raw.githubusercontent.com/JohnnyMorganz/luau-lsp/8e8a4e745c814ee8d3dd1cea8980901cb27a6970/scripts/globalTypes.d.luau","sha256":"F2C5CA08F17A08E9EC43EE998F0ED2825B00B4ADEA83ECE4775B21719E280765"}
+}
