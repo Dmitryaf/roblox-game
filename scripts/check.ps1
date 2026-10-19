@@ -8,6 +8,7 @@ New-Item -ItemType Directory -Force build | Out-Null
 Invoke-Check python @('scripts/check_architecture.py')
 Invoke-Check python @('-m', 'unittest', 'discover', '-s', 'tests/architecture', '-v')
 Invoke-Check '.tools/lune/lune.exe' @('run', 'tests/unit/arrow.luau')
+Invoke-Check '.tools/lune/lune.exe' @('run', 'tests/unit/match.luau')
 Invoke-Check '.tools/lune/lune.exe' @('run', 'tests/unit/arrow_pause.luau')
 Invoke-Check '.tools/lune/lune.exe' @('run', 'tests/unit/arrow_input.luau')
 Invoke-Check '.tools/rojo/rojo.exe' @('sourcemap', 'default.project.json', '-o', 'build/sourcemap.json')
