@@ -1,19 +1,35 @@
 --!strict
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local Rupture = require(script.Parent.DashRupture)
+local Pose = require(script.Parent.MeleePose)
 local DashEffects = {}
 local SILVER = Color3.fromRGB(208, 226, 237)
 type Entry = { event: any, character: Model, humanoid: Humanoid, root: BasePart, nodes: { Attachment },
 	trails: { Trail }, sound: Sound?, light: PointLight, peak: number, received: number, emitUntil: number, removeAt: number }
+type Ground = { effect: any, event: any, character: Model, humanoid: Humanoid, root: BasePart, started: number }
 
-function DashEffects.new()
+function DashEffects.new(sharedPose: any?)
+	local pose = sharedPose or Pose.new()
+	local ownsPose = sharedPose == nil
 	local entries: { [number]: Entry } = {}
+	local grounds: { [number]: Ground } = {}
+	local folder = Instance.new("Folder")
+	folder.Name, folder.Parent = "LocalDashEffects", workspace
 	local retired: { [number]: number } = {}
 	local stopped, lastStep = false, 0
 	local effects = {}
-	local function remove(id: number)
+	local function clearGround(id: number)
+		local ground = grounds[id]
+		if ground then ground.effect.destroy(); grounds[id] = nil end
+	end
+	local function remove(id: number, cancel: boolean?)
+		local ground = grounds[id]
+		if cancel ~= false then clearGround(id)
+		elseif ground then ground.effect.finish(workspace:GetServerTimeNow()) end
 		local entry = entries[id]
 		if not entry then return end
+		if cancel ~= false then pose.stop(entry.event.owner, "dash", id) end
 		for _, trail in entry.trails do trail:Destroy() end
 		for _, node in entry.nodes do node:Destroy() end
 		if entry.sound then entry.sound:Destroy() end
@@ -31,6 +47,7 @@ function DashEffects.new()
 			elseif entry then
 				entry.emitUntil = math.min(entry.emitUntil, now)
 				entry.removeAt = math.min(entry.removeAt, now + 0.18)
+				if grounds[id] then grounds[id].effect.finish(now) end
 			end
 			retired[id] = now + 10
 			return
@@ -48,16 +65,28 @@ function DashEffects.new()
 		for oldId, old in entries do
 			if old.event.owner == event.owner then remove(oldId) end
 		end
+		local count, oldestId, oldestAt = 0, nil, math.huge
+		for oldId, old in grounds do
+			if old.event.owner == event.owner then clearGround(oldId)
+			else
+				count += 1
+				if old.started < oldestAt then oldestId, oldestAt = oldId, old.started end
+			end
+		end
+		if count >= 6 and oldestId then clearGround(oldestId) end
+		grounds[id] = { effect = Rupture.new(folder, character, root, event.direction, id, quiet), event = event,
+			character = character, humanoid = humanoid, root = root, started = now }
+		if not quiet then pose.beginDash(event.owner, event.duration or 0.28, event.direction, id) end
 		-- Native trails follow replicated movement rather than the server's old start position.
 		local nodes: { Attachment }, trails: { Trail } = {}, {}
 		for _, side in { -1, 1 } do
 			local low, high = Instance.new("Attachment"), Instance.new("Attachment")
-			low.Name, low.Position, low.Parent = "DashTrailLow", Vector3.new(side * 0.9, -0.5, 0.3), root
-			high.Name, high.Position, high.Parent = "DashTrailHigh", Vector3.new(side * 0.9, 0.5, 0.3), root
+			low.Name, low.Position, low.Parent = "DashTrailLow", Vector3.new(side * 1.0, -0.6, 0.3), root
+			high.Name, high.Position, high.Parent = "DashTrailHigh", Vector3.new(side * 1.0, 1.0, 0.3), root
 			local trail = Instance.new("Trail")
 			trail.Name, trail.Attachment0, trail.Attachment1 = "WarriorDashTrail", low, high
 			trail.Color, trail.Lifetime, trail.MinLength = ColorSequence.new(SILVER), 0.17, 0.08
-			trail.Transparency = NumberSequence.new(0.4, 1)
+			trail.Transparency = NumberSequence.new(0.24, 1)
 			trail.WidthScale = NumberSequence.new(0.65, 0)
 			trail.LightEmission, trail.FaceCamera, trail.Parent = 0.35, true, root
 			table.insert(nodes, low); table.insert(nodes, high); table.insert(trails, trail)
@@ -67,7 +96,7 @@ function DashEffects.new()
 		local sound: Sound? = nil
 		if not quiet then
 			local whoosh = Instance.new("Sound")
-			whoosh.Name, whoosh.SoundId, whoosh.Volume, whoosh.PlaybackSpeed = "WarriorDashWhoosh", "rbxasset://sounds/warlock-art-v1/launch.wav", 0.28, 1.25
+			whoosh.Name, whoosh.SoundId, whoosh.Volume, whoosh.PlaybackSpeed = "WarriorDashWhoosh", "rbxasset://sounds/warrior-v1/rupture.wav", 0.36, 1
 			whoosh.RollOffMinDistance, whoosh.RollOffMaxDistance, whoosh.Parent = 8, 65, root
 			whoosh:Play(); sound = whoosh
 		end
@@ -95,13 +124,25 @@ function DashEffects.new()
 	function effects.step(now: number)
 		if stopped then return end
 		lastStep = now
+		pose.step(now)
 		for id, expires in retired do if now >= expires then retired[id] = nil end end
 		for id, entry in entries do
 			local player = Players:GetPlayerByUserId(entry.event.owner)
-			if not player or player.Character ~= entry.character or not entry.root.Parent or entry.humanoid.Health <= 0
-				or entry.character:GetAttribute("CombatClass") ~= "warrior" or now >= entry.removeAt then remove(id); continue end
+			local invalid = not player or player.Character ~= entry.character or not entry.root.Parent or entry.humanoid.Health <= 0
+				or entry.character:GetAttribute("CombatClass") ~= "warrior" or entry.character:GetAttribute("CombatLife") ~= entry.event.life or entry.root.Anchored
+			if invalid then remove(id); continue end
+			if now >= entry.removeAt then remove(id, false); continue end
 			for _, trail in entry.trails do trail.Enabled = now < entry.emitUntil end
 			entry.light.Brightness = math.max(0, entry.peak * (1 - (now - entry.received) / 0.1))
+		end
+		for id, ground in grounds do
+			local player = Players:GetPlayerByUserId(ground.event.owner)
+			if not player or player.Character ~= ground.character or not ground.root.Parent or ground.humanoid.Health <= 0
+				or ground.character:GetAttribute("CombatClass") ~= "warrior" or ground.character:GetAttribute("CombatLife") ~= ground.event.life or ground.root.Anchored then
+				clearGround(id); continue
+			end
+			local entry = entries[id]
+			if not ground.effect.step(now, entry ~= nil and now < entry.emitUntil) then grounds[id] = nil end
 		end
 	end
 	local heartbeat = RunService.Heartbeat:Connect(function()
@@ -113,6 +154,9 @@ function DashEffects.new()
 		stopped = true
 		heartbeat:Disconnect()
 		for id in entries do remove(id) end
+		for id in grounds do clearGround(id) end
+		folder:Destroy()
+		if ownsPose then pose.destroy() end
 	end
 	return effects
 end

@@ -64,7 +64,8 @@ local hands = HandsService.new({ alive = world.alive, placement = world.placemen
     damage = world.damage, slow = world.slow, emit = function(event) handsRemote:FireAllClients(event) end }, HandsConfig)
 local sword = SwordWorld.new(world)
 local melee = MeleeService.new({ alive = world.alive, origin = world.origin, face = world.face,
-    targets = sword.targets, damage = world.damage, emit = function(event) meleeRemote:FireAllClients(event) end }, WarriorConfig)
+    targets = sword.targets, damage = world.damage, impact = sword.impact,
+    emit = function(event) meleeRemote:FireAllClients(event) end }, WarriorConfig)
 local dash = DashService.new({ alive = world.alive, start = world.startDash, stop = world.stopDash,
     emit = function(event) dashRemote:FireAllClients(event) end }, DashConfig)
 combat = ClassCombat.new(WarlockCombat.new(arrow, hands), melee, classes.get, dash)

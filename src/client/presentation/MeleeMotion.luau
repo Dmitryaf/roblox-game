@@ -7,20 +7,20 @@ local function angles(x: number, y: number, z: number): Vector3
 end
 Motion.channels = {
     { names = { "Waist", "RootJoint" }, body = true, keys = {
-        angles(0, 0, 0), angles(-4, -18, 3), angles(-7, -32, 5), angles(-2, 5, -4),
-        angles(5, 34, -7), angles(-2, 9, -1), angles(0, 0, 0),
+        angles(0, 0, 0), angles(-6, -24, 5), angles(-12, -50, 8), angles(-2, 5, -4),
+        angles(9, 43, -10), angles(-3, 13, -2), angles(0, 0, 0),
     } },
     { names = { "Neck" }, body = true, keys = {
         angles(0, 0, 0), angles(0, 8, -2), angles(2, 13, -3), angles(-2, -3, 2),
         angles(-1, -12, 3), angles(1, -3, 0), angles(0, 0, 0),
     } },
     { names = { "RightShoulder", "Right Shoulder" }, body = false, keys = {
-        angles(-8, -4, 10), angles(21, -32, 30), angles(47, -63, 49), angles(0, 7, -29),
-        angles(-12, 73, -38), angles(-8, 29, -15), angles(-8, -4, 10),
+        angles(-8, -4, 10), angles(26, -42, 35), angles(58, -84, 56), angles(0, 7, -29),
+        angles(-22, 88, -43), angles(-10, 35, -18), angles(-8, -4, 10),
     } },
     { names = { "RightElbow" }, body = false, keys = {
-        angles(23, 0, 0), angles(66, 0, 0), angles(91, 0, 0), angles(17, 0, 0),
-        angles(25, 0, 0), angles(48, 0, 0), angles(23, 0, 0),
+        angles(23, 0, 0), angles(70, 0, 0), angles(104, 0, 0), angles(17, 0, 0),
+        angles(20, 0, 0), angles(52, 0, 0), angles(23, 0, 0),
     } },
     { names = { "RightWrist" }, body = false, keys = {
         angles(-5, 0, 4), angles(-17, -12, 10), angles(-24, -19, 14), angles(0, -7, -11),

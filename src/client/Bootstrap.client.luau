@@ -23,9 +23,11 @@ local DashHud = require(script.Parent.presentation.DashHud)
 local DashEffects = require(script.Parent.presentation.DashEffects)
 local DashInput = require(script.Parent.input.DashInput)
 local DashMotion = require(script.Parent.presentation.DashMotion)
+local WarriorPose = require(script.Parent.presentation.MeleePose)
 local WarriorAppearance = require(script.Parent.presentation.WarriorAppearance)
 local player = Players.LocalPlayer
 local dashMotion = DashMotion.new(player)
+local warriorPose = WarriorPose.new()
 local remote = ReplicatedStorage:WaitForChild("ArrowRemote", 15)
 assert(remote and remote:IsA("RemoteEvent"), "Combat test server did not start; check Server Output.")
 local gui = player:WaitForChild("PlayerGui") :: PlayerGui
@@ -43,10 +45,10 @@ if ReplicatedStorage:GetAttribute("MatchEnabled") == true then
     assert(classRemote and classRemote:IsA("RemoteEvent"), "Class server did not initialize")
     assert(meleeRemote and meleeRemote:IsA("RemoteEvent"), "Melee server did not initialize")
     stopClass = ClassController.start(player, classRemote, ClassHud.new(gui))
-    stopMelee = MeleeController.start(player, meleeRemote, MeleeHud.new(gui), MeleeEffects.new(), MeleeInput.bind)
+    stopMelee = MeleeController.start(player, meleeRemote, MeleeHud.new(gui), MeleeEffects.new(warriorPose), MeleeInput.bind)
     local dashRemote = ReplicatedStorage:WaitForChild("DashRemote", 15)
     assert(dashRemote and dashRemote:IsA("RemoteEvent"), "Dash server did not initialize")
-    stopDash = DashController.start(player, dashRemote, DashHud.new(gui), DashEffects.new(), DashInput.bind)
+    stopDash = DashController.start(player, dashRemote, DashHud.new(gui), DashEffects.new(warriorPose), DashInput.bind)
     local handsRemote = ReplicatedStorage:WaitForChild("HandsRemote", 15)
     assert(handsRemote and handsRemote:IsA("RemoteEvent"), "Hands server did not initialize")
     stopHands = HandsController.start(player, handsRemote, HandsHud.new(gui),
@@ -66,4 +68,5 @@ script.Destroying:Connect(function()
 	if stopHands then stopHands() end
 	stop()
 	if stopMatch then stopMatch() end
+	warriorPose.destroy()
 end)

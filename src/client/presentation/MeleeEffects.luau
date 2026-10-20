@@ -3,16 +3,19 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local Debris = game:GetService("Debris")
 local Pose = require(script.Parent.MeleePose)
+local Impact = require(script.Parent.MeleeImpact)
 local MeleeEffects = {}
 local SILVER, RED = Color3.fromRGB(218, 228, 231), Color3.fromRGB(157, 49, 47)
-type Swing = { event: any, root: BasePart?, beams: { Beam }, struck: boolean, played: boolean, scheduled: boolean, trail: Trail?, nodes: { Attachment } }
+type Swing = { event: any, root: BasePart?, beams: { Beam }, struck: boolean, played: boolean, scheduled: boolean, trail: Trail?, nodes: { Attachment }, brace: Sound? }
 
-function MeleeEffects.new()
+function MeleeEffects.new(sharedPose: any?)
 	local folder = Instance.new("Folder")
 	folder.Name, folder.Parent = "LocalMeleeEffects", workspace
 	local swings: { [number]: Swing } = {}
 	local retired: { [number]: number } = {}
-	local pose = Pose.new()
+	local pose = sharedPose or Pose.new()
+	local ownsPose = sharedPose == nil
+	local impact = Impact.new(folder)
 	local stopped, lastStep = false, 0
 	local effects = {}
 	local function body(owner: number): BasePart?
@@ -56,7 +59,7 @@ function MeleeEffects.new()
 		end
 		if not quiet then
 			local sound = Instance.new("Sound")
-			sound.Name, sound.SoundId, sound.Volume, sound.PlaybackSpeed = "SwordWhoosh", "rbxasset://sounds/warlock-art-v1/launch.wav", 0.34, 0.82
+			sound.Name, sound.SoundId, sound.Volume, sound.PlaybackSpeed = "SwordWhoosh", "rbxasset://sounds/warrior-v1/slash.wav", 0.45, 1
 			sound.RollOffMinDistance, sound.RollOffMaxDistance, sound.Parent = 8, 75, root
 			sound:Play()
 		end
@@ -86,9 +89,10 @@ function MeleeEffects.new()
     local function remove(id: number, cancel: boolean)
 		local entry = swings[id]
 		if not entry then return end
-		if cancel then pose.stop(entry.event.owner) end
+		if cancel then pose.stop(entry.event.owner, "melee", entry.event.swingId); impact.cancel(entry.event.owner, id) end
 		if entry.root then entry.root:Destroy() end
         if entry.trail then entry.trail:Destroy() end
+        if entry.brace then entry.brace:Destroy() end
         for _, node in entry.nodes do node:Destroy() end
 		retired[id] = entry.event.expiresAt
 		swings[id] = nil
@@ -96,6 +100,11 @@ function MeleeEffects.new()
 	function effects.event(event: any, quiet: boolean?)
 		if stopped then return end
 		local id: number = event.swingId
+		if event.kind == "contact" then
+			local current = swings[id]
+			if current and current.event.owner == event.owner and current.event.life == event.life then impact.hit(event) end
+			return
+		end
 		if event.kind == "ended" then
 			local cancelled = event.reason ~= "expired" and event.reason ~= "finished"
 			if swings[id] then remove(id, cancelled) else retired[id] = event.expiresAt or workspace:GetServerTimeNow() + 1 end
@@ -108,10 +117,20 @@ function MeleeEffects.new()
 		local scheduled = event.kind == "preparing" and not quiet
 		if previous and previous.struck and event.kind == "preparing" then return end
 		local entry: Swing = previous or {event = event, root = nil, beams = {}, struck = false, played = false,
-            scheduled = scheduled, trail = nil, nodes = {}}
+            scheduled = scheduled, trail = nil, nodes = {}, brace = nil}
 		if not previous then
 			swings[id] = entry
-			pose.begin(event.owner, event.hitAt, event.startedAt, event.expiresAt, event.direction)
+			pose.begin(event.owner, event.hitAt, event.startedAt, event.expiresAt, event.direction, event.swingId)
+			if scheduled then
+				local root = body(event.owner)
+				if root then
+					local brace = Instance.new("Sound")
+					brace.Name, brace.SoundId, brace.Volume, brace.Parent = "WarriorSwordBrace", "rbxasset://sounds/warrior-v1/brace.wav", 0.3, root
+					brace.RollOffMinDistance, brace.RollOffMaxDistance = 6, 45
+					entry.brace = brace
+					brace:Play(); Debris:AddItem(brace, 0.4)
+				end
+			end
 		end
 		entry.event = event
 		if event.kind == "struck" and not entry.struck then
@@ -133,6 +152,7 @@ function MeleeEffects.new()
 		if stopped then return end
 		lastStep = now
 		pose.step(now)
+		impact.step(now)
 		for id, expires in retired do if now >= expires then retired[id] = nil end end
 		for id, entry in swings do
 			if now >= entry.event.expiresAt then remove(id, false); continue end
@@ -171,7 +191,9 @@ function MeleeEffects.new()
 		stopped = true
 		heartbeat:Disconnect()
 		for id in swings do remove(id, true) end
-		pose.destroy(); folder:Destroy()
+		impact.destroy()
+		if ownsPose then pose.destroy() end
+		folder:Destroy()
 	end
 	return effects
 end

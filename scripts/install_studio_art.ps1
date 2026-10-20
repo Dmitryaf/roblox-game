@@ -9,6 +9,7 @@ if (-not (Test-Path -LiteralPath (Join-Path $taskContent 'textures'))) { throw '
 foreach ($taskGroup in @(
     @{ Source='assets/audio/warlock-art-v1'; Target='sounds/warlock-art-v1'; Files=@('charge.wav','launch.wav','impact.wav','teleport.wav') },
     @{ Source='assets/audio/warlock-art-v2'; Target='sounds/warlock-art-v2'; Files=@('charge.wav','impact.wav') },
+    @{ Source='assets/audio/warrior-v1'; Target='sounds/warrior-v1'; Files=@('brace.wav','slash.wav','impact.wav','rupture.wav') },
     @{ Source='assets/textures/warlock-art-v1'; Target='textures/warlock-art-v1'; Files=@('flame.png','smoke.png') }
 )) {
     $taskDestination = Join-Path $taskContent $taskGroup.Target

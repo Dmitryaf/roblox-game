@@ -77,7 +77,7 @@ function MeleeController.start(player: Player, remote: RemoteEvent, hud: any, ef
 			end
 			return
 		end
-		if event.kind ~= "preparing" and event.kind ~= "struck" and event.kind ~= "ended" then return end
+		if event.kind ~= "preparing" and event.kind ~= "struck" and event.kind ~= "ended" and event.kind ~= "contact" then return end
 		if event.owner == player.UserId then
 			if not synced or event.life ~= life then return end
 		else
@@ -90,7 +90,7 @@ function MeleeController.start(player: Player, remote: RemoteEvent, hud: any, ef
 					phase, swingId = "", nil
 					if event.readyAt then readyAt = event.readyAt end
 				end
-			else
+			elseif event.kind ~= "contact" then
 				phase, swingId = event.kind, event.swingId
 				if event.readyAt then readyAt = event.readyAt end
 			end

@@ -3,7 +3,8 @@ local SwordSwing = require(script.Parent.Parent.Parent.domain.combat.SwordSwing)
 type State = SwordSwing.State
 type Swing = SwordSwing.Swing
 export type Ports = { alive: (number) -> boolean, origin: (number) -> Vector3?, face: (number, Vector3) -> boolean,
-    targets: (number, Vector3, number, number) -> { any }, damage: (number, any, number) -> (), emit: (any) -> () }
+    targets: (number, Vector3, number, number) -> { any }, damage: (number, any, number) -> boolean?,
+    impact: ((any) -> Vector3?)?, emit: (any) -> () }
 local MeleeService = {}
 function MeleeService.new(ports: Ports, config: SwordSwing.Config)
     local states: { [number]: State } = {}
@@ -51,10 +52,18 @@ function MeleeService.new(ports: Ports, config: SwordSwing.Config)
                 swing.kind = "struck" -- Commit before damage callbacks can re-enter the service.
                 ports.emit(event(swing, "struck", origin, nil))
                 local seen: { [any]: boolean } = {}
+                local contacts = 0
                 for _, target in ports.targets(owner, swing.direction, config.range, config.arcDegrees) do
                     if seen[target] or state.swing ~= swing or not state.alive then continue end
                     seen[target] = true
-                    ports.damage(owner, target, config.damage)
+                    local damaged = ports.damage(owner, target, config.damage)
+                    local point = if damaged == true and ports.impact then ports.impact(target) else nil
+                    if point and state.swing == swing and state.alive then
+                        contacts += 1
+                        local contact = event(swing, "contact", point, nil)
+                        contact.contactId = contacts
+                        ports.emit(contact)
+                    end
                 end
             end
         end

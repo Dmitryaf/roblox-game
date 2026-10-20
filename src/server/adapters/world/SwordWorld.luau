@@ -2,6 +2,11 @@
 local SwordWorld = {}
 function SwordWorld.new(world: any)
     return {
+        impact = function(target: Humanoid): Vector3?
+            local model = target.Parent
+            local root = if model then model:FindFirstChild("HumanoidRootPart") else nil
+            return if root and root:IsA("BasePart") then root.Position + Vector3.yAxis * 0.6 else nil
+        end,
         targets = function(owner: number, direction: Vector3, range: number, arcDegrees: number): { Humanoid }
             local origin = world.origin(owner)
             if not origin then return {} end
