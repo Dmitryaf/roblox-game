@@ -171,6 +171,15 @@ function CombatWorld.new(spawns: { CFrame }?, policy: Policy?)
 		b.trusted, b.at = b.root.CFrame, os.clock()
 		if policy then policy.accepted(owner, destination) end
 	end
+    function world.face(owner: number, direction: Vector3): boolean
+        if not world.validate(owner) then return false end
+        local flat = direction * Vector3.new(1, 0, 1)
+        if flat.Magnitude < 0.1 then return false end
+        local body = bodies[owner]
+        body.root.CFrame = CFrame.lookAt(body.root.Position, body.root.Position + flat.Unit)
+        body.trusted = body.root.CFrame
+        return true
+    end
 	function world.position(owner: number): Vector3?
 		local b = bodies[owner]
 		return if b and world.alive(owner) then b.trusted.Position else nil
