@@ -10,6 +10,12 @@ function MatchCombat.new(combat: any, matches: any, tick: () -> (), attackReason
 	end
 	return {
 		snapshot = combat.snapshot, handsSnapshot = combat.handsSnapshot, meleeSnapshot = combat.meleeSnapshot,
+        dashSnapshot = combat.dashSnapshot,
+        dash = function(owner: number, life: number, direction: Vector3, now: number): (boolean, string?)
+            local reason = allowed(owner, life)
+            if reason then return false, reason end
+            return combat.dash(owner, life, direction, now)
+        end,
         swing = function(owner: number, life: number, direction: Vector3, now: number): (boolean, string?)
             local reason = allowed(owner, life)
             if reason then return false, reason end

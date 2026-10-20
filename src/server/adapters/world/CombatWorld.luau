@@ -1,6 +1,7 @@
 --!strict
 local Players = game:GetService("Players")
 local AreaWorld = require(script.Parent.AreaWorld)
+local DashWorld = require(script.Parent.DashWorld)
 local CombatWorld = {}
 type Body = { character: Model, root: BasePart, humanoid: Humanoid, trusted: CFrame, at: number, budget: number, vertical: number, warned: boolean, baseSpeed: number, slow: number }
 
@@ -15,6 +16,10 @@ export type Policy = {
 function CombatWorld.new(spawns: { CFrame }?, policy: Policy?)
 	local bodies: { [number]: Body } = {}
 	local world = {}
+	local dash = DashWorld.new(function(owner) return bodies[owner] end, function(owner, p)
+		if policy then return policy.contains(owner, p) and policy.allowed(owner, p) end
+		return math.abs(p.X) < 77 and math.abs(p.Z) < 77 and p.Y > 1 and p.Y < 24
+	end, function(owner, p, delta) return if policy then policy.barrier(owner, p, delta) else nil end)
 	local function params(character: Model): RaycastParams
 		local p = RaycastParams.new()
 		p.FilterType = Enum.RaycastFilterType.Exclude
@@ -28,6 +33,7 @@ function CombatWorld.new(spawns: { CFrame }?, policy: Policy?)
 	end
 
 	function world.register(owner: number, character: Model, root: BasePart, humanoid: Humanoid, base: CFrame?)
+		dash.stop(owner, "reset")
 		-- CharacterAdded can expose a root at (0,0,0) before Roblox finishes spawning.
 		-- Establish a valid server-owned initial position instead of trusting that transient frame.
 		if base or (spawns and #spawns > 0) then
@@ -42,6 +48,7 @@ function CombatWorld.new(spawns: { CFrame }?, policy: Policy?)
 			trusted = root.CFrame, at = os.clock(), budget = 8, vertical = 10, warned = false, baseSpeed = humanoid.WalkSpeed, slow = 1 }
 	end
 	function world.remove(owner: number)
+        dash.stop(owner, "removed")
         local b = bodies[owner]
         if b then b.humanoid.WalkSpeed = b.baseSpeed end
         bodies[owner] = nil
@@ -70,13 +77,16 @@ function CombatWorld.new(spawns: { CFrame }?, policy: Policy?)
 		b.budget = math.min(8 * b.slow, b.budget + 24 * b.slow * dt)
 		b.vertical = math.min(12, b.vertical + 80 * dt)
 		local delta = b.root.Position - b.trusted.Position
-		local flat = Vector3.new(delta.X, 0, delta.Z).Magnitude
+		local flat = Vector3.new(delta.X, 0, delta.Z)
 		local bounded = if policy then policy.contains(owner, b.root.Position) and policy.allowed(owner, b.root.Position) else inArena(b.root.Position)
-		local valid = bounded and flat <= b.budget and math.abs(delta.Y) <= b.vertical
+		local extra = dash.allowance(owner, delta)
+		local normal = (flat - extra).Magnitude
+		local valid = bounded and normal <= b.budget and math.abs(delta.Y) <= b.vertical
 		if valid and delta.Magnitude > 0.05 then
 			valid = workspace:Blockcast(b.trusted, Vector3.new(2, 3, 2), delta, params(b.character)) == nil
 		end
 		if not valid then
+			dash.stop(owner, "invalid_position")
 			if not b.warned then
 				warn("Combat movement rejected", owner, "observed", b.root.Position, "trusted", b.trusted.Position, "budget", b.budget, b.vertical)
 				b.warned = true
@@ -87,7 +97,8 @@ function CombatWorld.new(spawns: { CFrame }?, policy: Policy?)
 			return false
 		end
 		b.warned = false
-		b.budget -= flat
+		dash.consume(owner, extra.Magnitude)
+		b.budget = math.max(0, b.budget - normal)
 		b.vertical -= math.abs(delta.Y)
 		b.trusted = b.root.CFrame
 		if policy then policy.accepted(owner, b.trusted.Position) end
@@ -164,6 +175,7 @@ function CombatWorld.new(spawns: { CFrame }?, policy: Policy?)
 	end
 
 	function world.move(owner: number, destination: Vector3)
+		dash.stop(owner, "moved")
 		local b = bodies[owner]
 		b.root.CFrame = CFrame.new(destination) * b.root.CFrame.Rotation
 		b.root.AssemblyLinearVelocity = Vector3.zero
@@ -184,6 +196,7 @@ function CombatWorld.new(spawns: { CFrame }?, policy: Policy?)
 		return if b and world.alive(owner) then b.trusted.Position else nil
 	end
 	function world.place(owner: number, base: CFrame, frozen: boolean): boolean
+		dash.stop(owner, "reset")
 		local b = bodies[owner]
 		if not b or not world.alive(owner) then return false end
 		local height = if b.humanoid.RigType == Enum.HumanoidRigType.R6 then 3 else b.humanoid.HipHeight + b.root.Size.Y / 2
@@ -196,6 +209,7 @@ function CombatWorld.new(spawns: { CFrame }?, policy: Policy?)
 		return true
 	end
 	function world.freeze(owner: number, frozen: boolean)
+		if frozen then dash.stop(owner, "paused") end
 		local b = bodies[owner]
 		if b then b.root.Anchored = frozen; b.root.AssemblyLinearVelocity = Vector3.zero end
 	end
@@ -204,6 +218,11 @@ function CombatWorld.new(spawns: { CFrame }?, policy: Policy?)
 	end
 	local area = AreaWorld.new(world, policy)
 	world.placement, world.areaTargets = area.placement, area.targets
+	function world.startDash(owner: number, direction: Vector3, distance: number, duration: number): (Vector3?, number?, string?)
+		if not world.origin(owner) then return nil, nil, "invalid_position" end
+		return dash.start(owner, direction, distance, duration)
+	end
+	world.stopDash = dash.stop
 	return world
 end
 return CombatWorld

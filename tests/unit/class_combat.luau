@@ -7,6 +7,10 @@ local SwordSwing = require("../../build/test-source/server/domain/combat/SwordSw
 local Melee = luau.load(fs.readFile("build/test-source/server/application/combat/MeleeService.luau"), { environment = {
 	Vector3 = Vector3, require = function(path) assert(path == "../../domain/combat/SwordSwing"); return SwordSwing end,
 } })()
+local DashConfig = luau.load(fs.readFile("src/server/config/Dash.luau"))()
+local Dash = luau.load(fs.readFile("src/server/application/combat/DashService.luau"), {
+    debugName = "DashService", environment = { Vector3 = Vector3 },
+})()
 local Warlock = require("../../build/test-source/server/application/combat/WarlockCombat")
 local Aggregate = require("../../build/test-source/server/application/combat/ClassCombat")
 local ArrowConfig = require("../../build/test-source/server/config/Warlock")
@@ -19,8 +23,8 @@ local aim, point = Vector3.new(1, 0, 0), Vector3.new(4, 0, 0)
 local function fixture()
 	local f = { now = 0, classes = { [1] = "warlock", [2] = "warrior" }, living = { [1] = true, [2] = true },
 		positions = { [1] = Vector3.new(0, 3, 0), [2] = Vector3.new(6, 3, 0) },
-		events = { arrow = {}, hands = {}, melee = {} }, damages = { arrow = {}, hands = {}, melee = {} }, moves = {},
-		slows = {}, faces = {}, placements = {}, arrowOrigins = 0 }
+		events = { arrow = {}, hands = {}, melee = {}, dash = {} }, damages = { arrow = {}, hands = {}, melee = {} }, moves = {},
+		slows = {}, faces = {}, placements = {}, arrowOrigins = 0, dashStarts = {}, dashStops = {} }
 	local function alive(owner) return f.living[owner] == true end
 	local function origin(owner) return f.positions[owner] end
 	local function damage(kind)
@@ -37,10 +41,18 @@ local function fixture()
 	local melee = Melee.new({ alive = alive, origin = origin, face = function(owner, direction)
 		table.insert(f.faces, { owner = owner, direction = direction }); return true end,
 		targets = function() return { "arc-enemy", "arc-enemy" } end, damage = damage("melee"), emit = emit("melee") }, MeleeConfig)
-	f.combat = Aggregate.new(Warlock.new(arrow, hands), melee, function(owner) return f.classes[owner] or "warlock" end)
+	local dash = Dash.new({ alive = alive,
+        start = function(owner, direction, distance, duration)
+            table.insert(f.dashStarts, { owner = owner, direction = direction, distance = distance, duration = duration })
+            return origin(owner), distance, nil
+        end,
+        stop = function(owner, reason) table.insert(f.dashStops, { owner = owner, reason = reason }) end,
+        emit = emit("dash"),
+    }, DashConfig)
+    f.combat = Aggregate.new(Warlock.new(arrow, hands), melee, function(owner) return f.classes[owner] or "warlock" end, dash)
 	f.combat.join(1, 10); f.combat.join(2, 20)
 	function f.step(at) f.now = at; f.combat.step(at) end
-	function f.snapshots(owner) return { f.combat.snapshot(owner), f.combat.handsSnapshot(owner), f.combat.meleeSnapshot(owner) } end
+	function f.snapshots(owner) return { f.combat.snapshot(owner), f.combat.handsSnapshot(owner), f.combat.meleeSnapshot(owner), f.combat.dashSnapshot(owner) } end
 	function f.armAll()
 		assert(f.combat.cast(1, 10, aim, 0)); f.step(ArrowConfig.windup)
 		assert(f.combat.castHands(1, 10, point, ArrowConfig.windup))
@@ -142,5 +154,72 @@ test("leave and destroy clear all abilities and remove every slow contribution",
 		assert(f.slows[2] == 1 and #f.damages.melee == 0 and #f.damages.hands == 0)
 		assert(f.ends("arrow") == 1 and f.ends("hands") == 1 and f.ends("melee") == 1)
 	end
+end)
+test("wrong class dash refuses before starting world movement or spending cooldown", function()
+    local f = fixture(); local ok, reason = f.combat.dash(1, 10, aim, 0)
+    assert(not ok and reason == "wrong_class" and #f.dashStarts == 0 and #f.events.dash == 0)
+    assert(f.combat.dashSnapshot(1).readyAt == 0 and #f.combat.dashSnapshot(1).active == 0)
+    assert(f.combat.dash(2, 20, aim, 0) and f.dashStarts[1].owner == 2)
+end)
+test("sword preparation and recovery refuse dash without cancelling or spending dash cooldown", function()
+    local f = fixture(); assert(f.combat.swing(2, 20, aim, 0))
+    for _, at in { 0.1, 0.4, 0.749 } do
+        local ok, reason = f.combat.dash(2, 20, aim, at)
+        assert(not ok and reason == "busy" and #f.dashStarts == 0 and f.combat.dashSnapshot(2).readyAt == 0)
+    end
+    assert(#f.damages.melee == 1 and #f.combat.meleeSnapshot(2).active == 1)
+    assert(f.combat.dash(2, 20, aim, 0.75) and #f.combat.meleeSnapshot(2).active == 0)
+end)
+test("active dash refuses sword and a second dash but never blocks another warrior", function()
+    local f = fixture(); assert(f.combat.dash(2, 20, aim, 0))
+    local ok, reason = f.combat.swing(2, 20, aim, 0.1)
+    assert(not ok and reason == "busy" and #f.faces == 0 and f.combat.meleeSnapshot(2).readyAt == 0)
+    ok, reason = f.combat.dash(2, 20, aim, 0.1)
+    assert(not ok and reason == "busy" and #f.dashStarts == 1 and #f.dashStops == 0)
+    f.classes[1] = "warrior"; f.combat.join(1, 11)
+    assert(f.combat.swing(1, 11, aim, 0.1))
+    assert(f.combat.swing(2, 20, aim, DashConfig.duration))
+    assert(#f.dashStops == 1 and f.dashStops[1].reason == "expired")
+end)
+test("dash and sword cooldowns remain independent after their active windows", function()
+    local f = fixture(); assert(f.combat.dash(2, 20, aim, 0))
+    assert(f.combat.swing(2, 20, aim, DashConfig.duration))
+    near(f.combat.dashSnapshot(2).readyAt, 5)
+    near(f.combat.meleeSnapshot(2).readyAt, DashConfig.duration + MeleeConfig.cooldown)
+    f.step(DashConfig.duration + MeleeConfig.windup + MeleeConfig.recovery)
+    local ok, reason = f.combat.dash(2, 20, aim, 1.1)
+    assert(not ok and reason == "cooldown")
+    assert(f.combat.swing(2, 20, aim, 1.2))
+    assert(f.combat.dash(2, 20, aim, 5))
+    near(f.combat.meleeSnapshot(2).readyAt, 2.1)
+end)
+test("aggregate pause cancels physical dash once and resume preserves its remaining cooldown", function()
+    local f = fixture(); assert(f.combat.dash(2, 20, aim, 0))
+    f.combat.pause(2, 0.1); f.combat.pause(2, 1); f.step(3)
+    assert(f.combat.dashSnapshot(2).suspended and #f.dashStops == 1 and f.dashStops[1].reason == "paused")
+    local ok, reason = f.combat.dash(2, 20, aim, 3); assert(not ok and reason == "paused")
+    f.combat.resume(2, 10); near(f.combat.dashSnapshot(2).readyAt, 14.9)
+    assert(not f.combat.dashSnapshot(2).suspended and f.ends("dash") == 1)
+end)
+test("death, respawn and class change stop the old dash before authorizing a fresh life", function()
+    local f = fixture(); assert(f.combat.dash(2, 20, aim, 0))
+    f.combat.die(2); f.combat.die(2); f.step(1)
+    assert(#f.dashStops == 1 and f.dashStops[1].reason == "dead" and not f.combat.dashSnapshot(2).alive)
+    f.combat.join(2, 21); assert(f.combat.dash(2, 21, aim, 1))
+    f.classes[2] = "warlock"; f.combat.join(2, 22)
+    assert(#f.dashStops == 2 and f.dashStops[2].reason == "reset")
+    assert(f.combat.dashSnapshot(2).life == 22 and f.combat.dashSnapshot(2).readyAt == 0)
+    local ok, reason = f.combat.dash(2, 22, aim, 1.1)
+    assert(not ok and reason == "wrong_class" and #f.combat.dashSnapshot(2).active == 0)
+    assert(f.combat.cast(2, 22, aim, 1.1))
+end)
+test("aggregate leave and destruction release active physical movement once", function()
+    for _, method in { "leave", "destroy" } do
+        local f = fixture(); assert(f.combat.dash(2, 20, aim, 0))
+        if method == "leave" then f.combat.leave(2); f.combat.leave(2) else f.combat.destroy(); f.combat.destroy() end
+        f.step(3)
+        assert(#f.dashStops == 1 and f.ends("dash") == 1 and f.combat.dashSnapshot(2).life == 0)
+        assert(#f.combat.dashSnapshot(2).active == 0)
+    end
 end)
 print(string.format("%d ClassCombat real-service integration tests passed", total))

@@ -16,6 +16,7 @@ function MatchRuntime.new(combat: any, world: any, arena: any, now: () -> number
     local handsGateway: any
     local classGateway: any
     local meleeGateway: any
+    local dashGateway: any
 	local lifeSequence, lastPublish = 0, 0
 	local stopped = false
 	local runtime = {}
@@ -25,6 +26,7 @@ function MatchRuntime.new(combat: any, world: any, arena: any, now: () -> number
         if player and handsGateway then handsGateway.sync(player) end
         if player and classGateway then classGateway.sync(player) end
         if player and meleeGateway then meleeGateway.sync(player) end
+        if player and dashGateway then dashGateway.sync(player) end
 	end
 	local function load(owner: number)
 		local player = players[owner]
@@ -147,6 +149,7 @@ function MatchRuntime.new(combat: any, world: any, arena: any, now: () -> number
         if handsGateway then handsGateway.forget(owner) end
         if classGateway then classGateway.forget(owner) end
         if meleeGateway then meleeGateway.forget(owner) end
+        if dashGateway then dashGateway.forget(owner) end
         if classes then classes.leave(owner) end
 	end
 	function runtime.tick()
@@ -155,13 +158,15 @@ function MatchRuntime.new(combat: any, world: any, arena: any, now: () -> number
         combat.step(now()) -- Resolve deaths before sampling objective occupants.
 		matches.step(now(), world.onZone())
 	end
-	function runtime.start(matchService: any, arrow: any, match: any, hands: any?, selection: any?, melee: any?)
+	function runtime.start(matchService: any, arrow: any, match: any, hands: any?, selection: any?, melee: any?, dash: any?)
 		matches, arrowGateway, matchGateway, handsGateway = matchService, arrow, match, hands
         classGateway, meleeGateway = selection, melee
+        dashGateway = dash
 		arrowGateway.start(); matchGateway.start()
         if handsGateway then handsGateway.start() end
         if classGateway then classGateway.start() end
         if meleeGateway then meleeGateway.start() end
+        if dashGateway then dashGateway.start() end
 		table.insert(connections, Players.PlayerAdded:Connect(addPlayer))
 		table.insert(connections, Players.PlayerRemoving:Connect(removePlayer))
 		table.insert(connections, RunService.Heartbeat:Connect(function()
@@ -186,6 +191,7 @@ function MatchRuntime.new(combat: any, world: any, arena: any, now: () -> number
         if handsGateway then handsGateway.destroy() end
         if classGateway then classGateway.destroy() end
         if meleeGateway then meleeGateway.destroy() end
+        if dashGateway then dashGateway.destroy() end
         if classes then classes.destroy() end
 	end
 	return runtime
