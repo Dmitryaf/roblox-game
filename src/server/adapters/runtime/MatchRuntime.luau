@@ -13,12 +13,14 @@ function MatchRuntime.new(combat: any, world: any, arena: any, now: () -> number
 	local matches: any
 	local arrowGateway: any
 	local matchGateway: any
+    local handsGateway: any
 	local lifeSequence, lastPublish = 0, 0
 	local stopped = false
 	local runtime = {}
 	local function sync(owner: number)
 		local player = players[owner]
 		if player and arrowGateway then arrowGateway.sync(player) end
+        if player and handsGateway then handsGateway.sync(player) end
 	end
 	local function load(owner: number)
 		local player = players[owner]
@@ -136,20 +138,22 @@ function MatchRuntime.new(combat: any, world: any, arena: any, now: () -> number
 		if owned[owner] then for _, connection in owned[owner] do connection:Disconnect() end end
 		owned[owner] = nil
 		arrowGateway.forget(owner); matchGateway.forget(owner)
+        if handsGateway then handsGateway.forget(owner) end
 	end
 	function runtime.tick()
 		if stopped then return end
 		world.step()
+        combat.step(now()) -- Resolve deaths before sampling objective occupants.
 		matches.step(now(), world.onZone())
 	end
-	function runtime.start(matchService: any, arrow: any, match: any)
-		matches, arrowGateway, matchGateway = matchService, arrow, match
+	function runtime.start(matchService: any, arrow: any, match: any, hands: any?)
+		matches, arrowGateway, matchGateway, handsGateway = matchService, arrow, match, hands
 		arrowGateway.start(); matchGateway.start()
+        if handsGateway then handsGateway.start() end
 		table.insert(connections, Players.PlayerAdded:Connect(addPlayer))
 		table.insert(connections, Players.PlayerRemoving:Connect(removePlayer))
 		table.insert(connections, RunService.Heartbeat:Connect(function()
 			runtime.tick()
-			combat.step(now())
 			if now() - lastPublish >= 0.2 then
 				lastPublish = now()
 				for _, player in players do matchGateway.sync(player) end
@@ -164,6 +168,7 @@ function MatchRuntime.new(combat: any, world: any, arena: any, now: () -> number
 		for _, player in table.clone(players) do removePlayer(player) end
 		matches.destroy(); combat.destroy()
 		arrowGateway.destroy(); matchGateway.destroy()
+        if handsGateway then handsGateway.destroy() end
 	end
 	return runtime
 end

@@ -1,7 +1,8 @@
 --!strict
 local Players = game:GetService("Players")
+local AreaWorld = require(script.Parent.AreaWorld)
 local CombatWorld = {}
-type Body = { character: Model, root: BasePart, humanoid: Humanoid, trusted: CFrame, at: number, budget: number, vertical: number, warned: boolean }
+type Body = { character: Model, root: BasePart, humanoid: Humanoid, trusted: CFrame, at: number, budget: number, vertical: number, warned: boolean, baseSpeed: number, slow: number }
 
 export type Policy = {
 	contains: (number, Vector3) -> boolean,
@@ -38,9 +39,23 @@ function CombatWorld.new(spawns: { CFrame }?, policy: Policy?)
 		end
 		assert(if policy then policy.contains(owner, root.Position) else inArena(root.Position), "Character needs a valid server spawn before registration")
 		bodies[owner] = { character = character, root = root, humanoid = humanoid,
-			trusted = root.CFrame, at = os.clock(), budget = 8, vertical = 10, warned = false }
+			trusted = root.CFrame, at = os.clock(), budget = 8, vertical = 10, warned = false, baseSpeed = humanoid.WalkSpeed, slow = 1 }
 	end
-	function world.remove(owner: number) bodies[owner] = nil end
+	function world.remove(owner: number)
+        local b = bodies[owner]
+        if b then b.humanoid.WalkSpeed = b.baseSpeed end
+        bodies[owner] = nil
+    end
+    function world.slow(target: Humanoid, multiplier: number)
+        for _, b in bodies do
+            if b.humanoid == target then
+                b.slow = math.clamp(multiplier, 0.1, 1)
+                b.humanoid.WalkSpeed = b.baseSpeed * b.slow
+                b.budget = math.min(b.budget, 8 * b.slow)
+                return
+            end
+        end
+    end
 	function world.alive(owner: number): boolean
 		local b = bodies[owner]
 		return b ~= nil and b.character.Parent ~= nil and b.root.Parent ~= nil and b.humanoid.Health > 0
@@ -52,7 +67,7 @@ function CombatWorld.new(spawns: { CFrame }?, policy: Policy?)
 		local now = os.clock()
 		local dt = math.max(0, now - b.at)
 		b.at = now
-		b.budget = math.min(8, b.budget + 24 * dt)
+		b.budget = math.min(8 * b.slow, b.budget + 24 * b.slow * dt)
 		b.vertical = math.min(12, b.vertical + 80 * dt)
 		local delta = b.root.Position - b.trusted.Position
 		local flat = Vector3.new(delta.X, 0, delta.Z).Magnitude
@@ -169,6 +184,7 @@ function CombatWorld.new(spawns: { CFrame }?, policy: Policy?)
 		b.root.AssemblyLinearVelocity, b.root.AssemblyAngularVelocity = Vector3.zero, Vector3.zero
 		b.trusted, b.at, b.budget, b.vertical = b.root.CFrame, os.clock(), 8, 10
 		b.humanoid.Health = b.humanoid.MaxHealth
+        b.slow, b.humanoid.WalkSpeed = 1, b.baseSpeed
 		return true
 	end
 	function world.freeze(owner: number, frozen: boolean)
@@ -178,6 +194,8 @@ function CombatWorld.new(spawns: { CFrame }?, policy: Policy?)
 	function world.step()
 		for owner in bodies do world.validate(owner) end
 	end
+	local area = AreaWorld.new(world, policy)
+	world.placement, world.areaTargets = area.placement, area.targets
 	return world
 end
 return CombatWorld
