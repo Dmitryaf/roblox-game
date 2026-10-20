@@ -13,9 +13,10 @@ warrior = "--warrior" in sys.argv
 dash = "--dash" in sys.argv
 contact = "--contact" in sys.argv
 heavy = "--heavy" in sys.argv
+mixed = "--mixed" in sys.argv
 clients = int(sys.argv[sys.argv.index("--clients") + 1]) if "--clients" in sys.argv else 2
 assert clients in (2, 6)
-assert not (warrior or dash or contact or heavy) or clients == 2, "Warrior/dash/contact/heavy fixtures require two clients"
+assert not (warrior or dash or contact or heavy or mixed) or clients == 2, "Warrior/dash/contact/heavy/mixed fixtures require two clients"
 lag_ms = int(sys.argv[sys.argv.index("--lag-ms") + 1]) if "--lag-ms" in sys.argv else 0
 project = json.loads((ROOT / "default.project.json").read_text())
 project["tree"]["ReplicatedStorage"]["StudioTestToken"] = {
@@ -26,7 +27,7 @@ project["tree"]["ServerStorage"]["MatchWorldTests"] = {"$path": str(ROOT / "test
 project["tree"]["ServerStorage"]["DashWorldTests"] = {"$path": str(ROOT / "tests/studio/dash_world.luau")}
 project["tree"]["ServerStorage"]["MovementContactWorldTests"] = {"$path": str(ROOT / "tests/studio/movement_contact_world.luau")}
 project["tree"]["ServerStorage"]["SlowWorldTests"] = {"$path": str(ROOT / "tests/studio/slow_world.luau")}
-if not (match or hands or warrior or dash or contact or heavy):
+if not (match or hands or warrior or dash or contact or heavy or mixed):
     # Preserve the original arrow fixture and expectations as the main place grows.
     project["tree"]["ServerScriptService"]["Game"] = {
         name: {"$path": str(ROOT / "src/server" / name)}
@@ -78,6 +79,13 @@ if heavy:
     project["tree"]["ReplicatedStorage"]["HeavyTestDriver"] = {"$path": str(ROOT / "tests/studio/client/HeavyDriver.luau")}
     project["tree"]["ServerScriptService"]["HeavyTest"] = {"$path": str(ROOT / "tests/studio/heavy.server.luau")}
     project["tree"]["StarterPlayer"]["StarterPlayerScripts"]["HeavyTest"] = {"$path": str(ROOT / "tests/studio/heavy.client.luau")}
+if mixed:
+    project["tree"]["ServerStorage"]["$attributes"] = {"MatchTest": True, "MixedTest": True}
+    project["tree"]["ReplicatedStorage"]["MixedTestControl"] = {"$className": "RemoteEvent"}
+    project["tree"]["ReplicatedStorage"]["MixedClassDriver"] = {"$path": str(ROOT / "tests/studio/client/DashDriver.luau")}
+    project["tree"]["ReplicatedStorage"]["MixedTestDriver"] = {"$path": str(ROOT / "tests/studio/client/MixedDriver.luau")}
+    project["tree"]["ServerScriptService"]["MixedTest"] = {"$path": str(ROOT / "tests/studio/mixed.server.luau")}
+    project["tree"]["StarterPlayer"]["StarterPlayerScripts"]["MixedTest"] = {"$path": str(ROOT / "tests/studio/mixed.client.luau")}
 # This project lives in build/, so resolve source paths before writing it.
 def absolute_paths(value):
     if isinstance(value, dict):
@@ -88,7 +96,7 @@ def absolute_paths(value):
                 absolute_paths(item)
 absolute_paths(project)
 (ROOT / "build/studio-test.project.json").write_text(json.dumps(project), encoding="utf-8")
-runtime_test = multiplayer or match or hands or warrior or dash or contact or heavy
+runtime_test = multiplayer or match or hands or warrior or dash or contact or heavy or mixed
 test_expression = f'game:GetService("StudioTestService"):ExecuteMultiplayerTestAsync({clients}, {{ lagMs = {lag_ms}, clients = {clients} }})' if runtime_test else '(function() assert(require(game:GetService("ServerStorage"):WaitForChild("StudioWorldTests", 10))); assert(require(game:GetService("ServerStorage"):WaitForChild("MatchWorldTests", 10))); assert(require(game:GetService("ServerStorage"):WaitForChild("DashWorldTests", 10))); assert(require(game:GetService("ServerStorage"):WaitForChild("MovementContactWorldTests", 10)).run()); assert(require(game:GetService("ServerStorage"):WaitForChild("SlowWorldTests", 10))); return true end)()'
 plugin = f'''--!strict
 task.defer(function()
