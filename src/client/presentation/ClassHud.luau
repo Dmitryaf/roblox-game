@@ -5,8 +5,8 @@ function ClassHud.new(playerGui: PlayerGui)
 	local gui = Instance.new("ScreenGui")
 	gui.Name, gui.ResetOnSpawn, gui.DisplayOrder = "ClassHud", false, 6
 	local panel = Instance.new("Frame")
-	panel.Name, panel.AnchorPoint = "ClassPanel", Vector2.new(1, 0)
-	panel.Position, panel.Size = UDim2.new(1, -12, 0, 126), UDim2.fromOffset(220, 202)
+	panel.Name, panel.AnchorPoint = "ClassPanel", Vector2.new(1, 1)
+	panel.Position, panel.Size = UDim2.new(1, -12, 1, -104), UDim2.fromOffset(220, 202)
 	panel.BackgroundColor3, panel.BackgroundTransparency = Color3.fromRGB(22, 18, 31), 0.12
 	panel.Parent = gui
 	local corner = Instance.new("UICorner")
@@ -45,6 +45,11 @@ function ClassHud.new(playerGui: PlayerGui)
 	return {
 		setAction = function(action: (string) -> ()) callback = action end,
 		show = function(state: any, pending: boolean, note: string)
+            gui.Enabled = state ~= nil and not state.locked
+            local camera = workspace.CurrentCamera
+            local compact = camera ~= nil and camera.ViewportSize.Y < 560
+            panel.AnchorPoint = Vector2.new(if compact then 0.5 else 1, 1)
+            panel.Position = if compact then UDim2.new(0.5, 0, 1, -104) else UDim2.new(1, -12, 1, -104)
 			current.Text = if state then "Сейчас: " .. (names[state.classId] or "Неизвестный класс") else "Подключаемся…"
 			local locked = not state or state.locked or not state.alive
 			feedback.Text = if note ~= "" then note else if pending then "Ожидаем подтверждения сервера…"
