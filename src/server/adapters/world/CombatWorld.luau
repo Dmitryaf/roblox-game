@@ -2,6 +2,7 @@
 local Players = game:GetService("Players")
 local AreaWorld = require(script.Parent.AreaWorld)
 local DashWorld = require(script.Parent.DashWorld)
+local MovementSweep = require(script.Parent.MovementSweep)
 local CombatWorld = {}
 type Body = { character: Model, root: BasePart, humanoid: Humanoid, trusted: CFrame, at: number, budget: number, vertical: number, warned: boolean, baseSpeed: number, slow: number }
 
@@ -68,7 +69,7 @@ function CombatWorld.new(spawns: { CFrame }?, policy: Policy?)
 		return b ~= nil and b.character.Parent ~= nil and b.root.Parent ~= nil and b.humanoid.Health > 0
 	end
 
-	function world.validate(owner: number): boolean
+	function world.validate(owner: number, source: string?): boolean
 		local b = bodies[owner]
 		if not b or not world.alive(owner) then return false end
 		local now = os.clock()
@@ -82,13 +83,21 @@ function CombatWorld.new(spawns: { CFrame }?, policy: Policy?)
 		local extra = dash.allowance(owner, delta)
 		local normal = (flat - extra).Magnitude
 		local valid = bounded and normal <= b.budget and math.abs(delta.Y) <= b.vertical
+		local obstruction: RaycastResult? = nil
 		if valid and delta.Magnitude > 0.05 then
-			valid = workspace:Blockcast(b.trusted, Vector3.new(2, 3, 2), delta, params(b.character)) == nil
+			obstruction = MovementSweep.blocker(b.character, b.root, b.trusted, delta)
+			valid = obstruction == nil
 		end
 		if not valid then
 			dash.stop(owner, "invalid_position")
+			local corrections = b.character:GetAttribute("CombatMovementCorrections")
+			b.character:SetAttribute("CombatMovementCorrections", if type(corrections) == "number" then corrections + 1 else 1)
 			if not b.warned then
-				warn("Combat movement rejected", owner, "observed", b.root.Position, "trusted", b.trusted.Position, "budget", b.budget, b.vertical)
+				local reason = if not bounded then "bounds" else if normal > b.budget then "speed"
+					else if math.abs(delta.Y) > b.vertical then "vertical" else "collision"
+				warn("Combat movement rejected", owner, "reason", reason, "source", source or "query",
+					"hit", if obstruction then obstruction.Instance:GetFullName() else "none",
+					"observed", b.root.Position, "trusted", b.trusted.Position, "budget", b.budget, b.vertical)
 				b.warned = true
 			end
 			b.root.CFrame = b.trusted
@@ -106,7 +115,7 @@ function CombatWorld.new(spawns: { CFrame }?, policy: Policy?)
 	end
 
 	function world.origin(owner: number): Vector3?
-		if not world.validate(owner) then return nil end
+		if not world.validate(owner, "origin") then return nil end
 		if policy and not policy.castAllowed(owner) then return nil end
 		return bodies[owner].trusted.Position + Vector3.new(0, 1, 0)
 	end
@@ -132,19 +141,24 @@ function CombatWorld.new(spawns: { CFrame }?, policy: Policy?)
 		return if #initial > 0 then position else (hit :: RaycastResult).Position, humanoid
 	end
 
-	function world.damage(owner: number, target: Humanoid, amount: number)
-		if not world.alive(owner) or target.Health <= 0 then return end
+	function world.damage(owner: number, target: Humanoid, amount: number): boolean
+		if not world.alive(owner) or target.Health <= 0 then return false end
 		local model = target.Parent
-		if not model or not model:IsA("Model") or model == bodies[owner].character then return end
+		if not model or not model:IsA("Model") or model == bodies[owner].character then return false end
 		if model:GetAttribute("TrainingTarget") then
-			if policy and not policy.damageAllowed(owner, nil, target) then return end
+			if policy and not policy.damageAllowed(owner, nil, target) then return false end
 			-- An inert target, not a bot. Reset before death so it remains usable.
 			target.Health = if target.Health <= amount then target.MaxHealth else target.Health - amount
-			return
+			return true
 		end
 		local player = Players:GetPlayerFromCharacter(model)
-		if policy and not policy.damageAllowed(owner, if player then player.UserId else nil, target) then return end
-		if player and world.alive(player.UserId) and world.validate(player.UserId) then target:TakeDamage(amount) end
+		if policy and not policy.damageAllowed(owner, if player then player.UserId else nil, target) then return false end
+		if player and world.alive(player.UserId) and world.validate(player.UserId, "damage") then
+			local health = target.Health
+			target:TakeDamage(amount)
+			return target.Health < health
+		end
+		return false
 	end
 
 	function world.landing(owner: number, position: Vector3, direction: Vector3): Vector3?
@@ -214,7 +228,7 @@ function CombatWorld.new(spawns: { CFrame }?, policy: Policy?)
 		if b then b.root.Anchored = frozen; b.root.AssemblyLinearVelocity = Vector3.zero end
 	end
 	function world.step()
-		for owner in bodies do world.validate(owner) end
+		for owner in bodies do world.validate(owner, "heartbeat") end
 	end
 	local area = AreaWorld.new(world, policy)
 	world.placement, world.areaTargets = area.placement, area.targets

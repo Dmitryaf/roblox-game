@@ -57,7 +57,7 @@ function AreaWorld.new(world: any, policy: any)
                 if not model or not humanoid or seen[humanoid] or humanoid.Health <= 0 or not root or not root:IsA("BasePart") then continue end
                 seen[humanoid] = true
                 local player = Players:GetPlayerFromCharacter(model)
-                if player and (player.UserId == owner or not world.alive(player.UserId) or not world.validate(player.UserId)) then continue end
+                if player and (player.UserId == owner or not world.alive(player.UserId) or not world.validate(player.UserId, "areaTargets")) then continue end
                 if not player and model:GetAttribute("TrainingTarget") ~= true then continue end
                 if policy and not policy.damageAllowed(owner, if player then player.UserId else nil, humanoid) then continue end
                 local delta = root.Position - center
