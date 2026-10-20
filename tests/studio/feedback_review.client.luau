@@ -105,7 +105,8 @@ local function preview(kind: string)
 	say("Реакция " .. kind .. ": визуальный клон слева; это не попадание и не урон.")
 	local camera = workspace.CurrentCamera :: Camera
 	previewCamera = { camera = camera, kind = camera.CameraType, frame = camera.CFrame }
-	camera.CameraType, camera.CFrame = Enum.CameraType.Scriptable, CFrame.lookAt(root().Position + Vector3.new(-10, 6, 14), cloneRoot.Position + Vector3.new(0, 1, 0))
+	local offsets = { Vector3.new(-10, 6, 14), Vector3.new(-13, 4, 0), Vector3.new(-8, 5, -14) }
+	camera.CameraType, camera.CFrame = Enum.CameraType.Scriptable, CFrame.lookAt(cloneRoot.Position + offsets[viewIndex], cloneRoot.Position + Vector3.new(0, 1, 0))
 	task.delay(0.06, function() if not stopped and clone == replica then capture("capture", "reaction-preview-" .. kind) end end)
 	-- Keep the preview in view until another action. Lifecycle cleanup belongs to this viewer.
 end
@@ -113,7 +114,7 @@ local function visibleEffect(item: Instance)
 	if vfxEnabled or hidden[item] then return end
 	local property: string? = nil
 	if item:IsA("BasePart") or item:IsA("Trail") or item:IsA("Beam") then property = "LocalTransparencyModifier"
-	elseif item:IsA("ParticleEmitter") then property = "Enabled" end
+	elseif item:IsA("ParticleEmitter") or item:IsA("Light") then property = "Enabled" end
 	if not property then return end
 	local ok, old = pcall(function() return (item :: any)[property :: string] end)
 	if not ok then return end
@@ -136,7 +137,7 @@ table.insert(connections, RunService.RenderStepped:Connect(function()
 	if player.Character then
 		for _, item in player.Character:GetDescendants() do
 			-- Only action trails/particles; no mover, rig, armour or ambient class skin changes.
-			if item:IsA("Trail") or item:IsA("Beam") or item:IsA("ParticleEmitter") then visibleEffect(item) end
+			if item:IsA("Trail") or item:IsA("Beam") or item:IsA("ParticleEmitter") or item:IsA("Light") then visibleEffect(item) end
 		end
 	end
 	for item, value in hidden do
@@ -147,6 +148,14 @@ end))
 local function place(z: number)
 	assert(control:InvokeServer("place", Vector3.new(230, 3, z)), "Review fixture placement failed")
 	task.wait(0.3)
+end
+local function selectClass(classId: string)
+	-- The technical panel must not intercept the real production class button.
+	local visible = panel.Visible
+	panel.Visible = false
+	local ok, result = pcall(function() return driver.run("class", classId) end)
+	panel.Visible = visible
+	assert(ok, tostring(result))
 end
 local function cast(ability: string)
 	clearClone()
@@ -164,6 +173,13 @@ local function cast(ability: string)
 	local point = if visible then Vector2.new(screen.X, screen.Y) else camera.ViewportSize / 2
 	if not visible then probe.mark("review_aim_fallback", { ability = ability, reason = "target_outside_selected_angle", actualHitGuaranteed = false }) end
 	input:SendMousePosition(point)
+	local panelVisible = panel.Visible
+	panel.Visible = false
+	-- As in MixedDriver.withView, focus the viewport before the real key. A
+	-- technical GUI button can otherwise leave Studio handling the keyboard.
+	input:SendMouseButton(point, Enum.UserInputType.MouseButton2, true)
+	input:SendMouseButton(point, Enum.UserInputType.MouseButton2, false)
+	RunService.RenderStepped:Wait()
 	local before = probe.mark("review_key", { ability = ability }).sequence
 	if ability == "melee" or ability == "arrow" then
 		input:SendMouseButton(point, Enum.UserInputType.MouseButton1, true); input:SendMouseButton(point, Enum.UserInputType.MouseButton1, false)
@@ -171,6 +187,7 @@ local function cast(ability: string)
 		local keyCode = if ability == "dash" or ability == "teleport" then Enum.KeyCode.E else Enum.KeyCode.Q
 		input:SendKey(true, keyCode, false); input:SendKey(false, keyCode, false)
 	end
+	panel.Visible = panelVisible
 	local result: any = nil
 	local deadline = os.clock() + 5
 	repeat
@@ -200,8 +217,8 @@ local function button(text: string, index: number, action: () -> (), immediate: 
 	item.BackgroundColor3, item.Parent = Color3.fromRGB(52, 61, 76), panel
 	table.insert(connections, item.Activated:Connect(function() if immediate then action() else run(text, action) end end))
 end
-button("Воин", 0, function() clearClone(); driver.run("class", "warrior"); place(-30); selectedAbility, reviewMode = "melee", "attack"; cameraView(); say("Воин · реальные LMB/Q/E, WASD.") end)
-button("Чернокнижник", 1, function() clearClone(); driver.run("class", "warlock"); place(-18); selectedAbility, reviewMode = "arrow", "attack"; cameraView(); say("Чернокнижник · реальные LMB/Q/E, WASD.") end)
+button("Воин", 0, function() clearClone(); selectClass("warrior"); place(-30); selectedAbility, reviewMode = "melee", "attack"; cameraView(); say("Воин · реальные LMB/Q/E, WASD.") end)
+button("Чернокнижник", 1, function() clearClone(); selectClass("warlock"); place(-18); selectedAbility, reviewMode = "arrow", "attack"; cameraView(); say("Чернокнижник · реальные LMB/Q/E, WASD.") end)
 button("Обычная атака", 2, function() selectedAbility, reviewMode = if driver.run("inspect").classId == "warrior" then "melee" else "arrow", "attack"; cast(selectedAbility) end)
 button("Способность Q", 3, function() selectedAbility, reviewMode = if driver.run("inspect").classId == "warrior" then "heavy" else "hands", "attack"; cast(selectedAbility) end)
 button("Рывок E", 4, function() if driver.run("inspect").classId ~= "warrior" then say("Для рывка выберите воина."); return end; selectedAbility, reviewMode = "dash", "attack"; place(20); cast("dash") end)
@@ -244,10 +261,12 @@ local function angle() viewIndex = viewIndex % 3 + 1; clearClone(); cameraView()
 button("Повтор / стоп · F8", 14, toggleLoop, true)
 button("Пауза повтора · F9", 15, togglePause, true)
 button("Ракурс · F4", 16, angle, true)
+button("Скрыть панель · F3", 17, function() panel.Visible = false end, true)
 table.insert(connections, UserInputService.InputBegan:Connect(function(input, processed)
 	local focus: any = UserInputService:GetFocusedTextBox()
 	if processed or focus or stopped then return end
-	if input.KeyCode == Enum.KeyCode.F4 then angle()
+	if input.KeyCode == Enum.KeyCode.F3 then panel.Visible = not panel.Visible
+	elseif input.KeyCode == Enum.KeyCode.F4 then angle()
 	elseif input.KeyCode == Enum.KeyCode.F6 then setVfx(not vfxEnabled)
 	elseif input.KeyCode == Enum.KeyCode.F7 then run("Реакция", function() reviewMode, selectedAbility = "reaction", "heavy"; preview("heavy") end)
 	elseif input.KeyCode == Enum.KeyCode.F8 then toggleLoop()
@@ -274,7 +293,7 @@ task.spawn(function()
 		if ReplicatedStorage:GetAttribute("FeedbackReviewAuto") ~= true then return true end
 		busy = true
 		for _, classId in { "warrior", "warlock" } do
-			driver.run("class", classId); place(if classId == "warrior" then -30 else -18)
+			selectClass(classId); place(if classId == "warrior" then -30 else -18)
 			capture("capture", classId .. "-idle")
 			cast(if classId == "warrior" then "melee" else "arrow"); task.wait(1.4)
 			cast(if classId == "warrior" then "heavy" else "hands"); task.wait(1.4)
