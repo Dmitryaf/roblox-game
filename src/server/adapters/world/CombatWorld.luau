@@ -4,7 +4,7 @@ local AreaWorld = require(script.Parent.AreaWorld)
 local DashWorld = require(script.Parent.DashWorld)
 local MovementSweep = require(script.Parent.MovementSweep)
 local CombatWorld = {}
-type Body = { character: Model, root: BasePart, humanoid: Humanoid, trusted: CFrame, at: number, budget: number, vertical: number, warned: boolean, baseSpeed: number, slow: number }
+type Body = { character: Model, root: BasePart, humanoid: Humanoid, trusted: CFrame, at: number, budget: number, vertical: number, warned: boolean, baseSpeed: number, slow: number, slows: { [string]: number } }
 
 export type Policy = {
 	contains: (number, Vector3) -> boolean,
@@ -46,7 +46,7 @@ function CombatWorld.new(spawns: { CFrame }?, policy: Policy?)
 		end
 		assert(if policy then policy.contains(owner, root.Position) else inArena(root.Position), "Character needs a valid server spawn before registration")
 		bodies[owner] = { character = character, root = root, humanoid = humanoid,
-			trusted = root.CFrame, at = os.clock(), budget = 8, vertical = 10, warned = false, baseSpeed = humanoid.WalkSpeed, slow = 1 }
+            trusted = root.CFrame, at = os.clock(), budget = 8, vertical = 10, warned = false, baseSpeed = humanoid.WalkSpeed, slow = 1, slows = {} }
 	end
 	function world.remove(owner: number)
         dash.stop(owner, "removed")
@@ -54,16 +54,33 @@ function CombatWorld.new(spawns: { CFrame }?, policy: Policy?)
         if b then b.humanoid.WalkSpeed = b.baseSpeed end
         bodies[owner] = nil
     end
-    function world.slow(target: Humanoid, multiplier: number)
+    function world.slow(target: Humanoid, multiplier: number, source: string?)
         for _, b in bodies do
             if b.humanoid == target then
-                b.slow = math.clamp(multiplier, 0.1, 1)
-                b.humanoid.WalkSpeed = b.baseSpeed * b.slow
-                b.budget = math.min(b.budget, 8 * b.slow)
+                local key = source or "hands"
+                if multiplier < 1 then b.slows[key] = math.clamp(multiplier, 0.1, 1) else b.slows[key] = nil end
+                local strongest = 1
+                for _, amount in b.slows do strongest = math.min(strongest, amount) end
+                b.slow = strongest
+                b.humanoid.WalkSpeed = b.baseSpeed * strongest
+                b.budget = math.min(b.budget, 8 * strongest)
                 return
             end
         end
     end
+    function world.targetOwner(target: Humanoid): number?
+        for owner, b in bodies do if b.humanoid == target then return owner end end
+        return nil
+    end
+    function world.slowToken(target: Humanoid): any
+        local model = target.Parent
+        if not model or not model:IsA("Model") or not model.Parent or target.Health <= 0 then return nil end
+        for _, b in bodies do
+            if b.humanoid == target and b.character == model then return model:GetAttribute("CombatLife") or model end
+        end
+        return if model:GetAttribute("TrainingTarget") == true then model else nil
+    end
+
 	function world.alive(owner: number): boolean
 		local b = bodies[owner]
 		return b ~= nil and b.character.Parent ~= nil and b.root.Parent ~= nil and b.humanoid.Health > 0
@@ -219,7 +236,7 @@ function CombatWorld.new(spawns: { CFrame }?, policy: Policy?)
 		b.root.AssemblyLinearVelocity, b.root.AssemblyAngularVelocity = Vector3.zero, Vector3.zero
 		b.trusted, b.at, b.budget, b.vertical = b.root.CFrame, os.clock(), 8, 10
 		b.humanoid.Health = b.humanoid.MaxHealth
-        b.slow, b.humanoid.WalkSpeed = 1, b.baseSpeed
+        b.slow, b.humanoid.WalkSpeed, b.slows = 1, b.baseSpeed, {}
 		return true
 	end
 	function world.freeze(owner: number, frozen: boolean)
@@ -228,7 +245,13 @@ function CombatWorld.new(spawns: { CFrame }?, policy: Policy?)
 		if b then b.root.Anchored = frozen; b.root.AssemblyLinearVelocity = Vector3.zero end
 	end
 	function world.step()
-		for owner in bodies do world.validate(owner, "heartbeat") end
+		for owner, b in bodies do
+            -- Dead targets cannot retain a movement actuator contribution until respawn.
+            if b.humanoid.Health <= 0 and b.slow ~= 1 then
+                b.slow, b.slows, b.humanoid.WalkSpeed = 1, {}, b.baseSpeed
+            end
+            world.validate(owner, "heartbeat")
+        end
 	end
 	local area = AreaWorld.new(world, policy)
 	world.placement, world.areaTargets = area.placement, area.targets

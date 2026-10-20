@@ -4,16 +4,16 @@ type State = SwordSwing.State
 type Swing = SwordSwing.Swing
 export type Ports = { alive: (number) -> boolean, origin: (number) -> Vector3?, face: (number, Vector3) -> boolean,
     targets: (number, Vector3, number, number) -> { any }, damage: (number, any, number) -> boolean?,
-    impact: ((any) -> Vector3?)?, emit: (any) -> () }
+    impact: ((any) -> Vector3?)?, onHit: ((number, any, number) -> ())?, emit: (any) -> () }
 local MeleeService = {}
-function MeleeService.new(ports: Ports, config: SwordSwing.Config)
+function MeleeService.new(ports: Ports, config: SwordSwing.Config, style: string?)
     local states: { [number]: State } = {}
     local paused: { [number]: number } = {}
     local sequence = 0
     local service = {}
     local function event(swing: Swing, kind: string, position: Vector3?, reason: string?): any
         local state = states[swing.owner]
-        return { kind = kind, reason = reason, owner = swing.owner, life = swing.life, swingId = swing.swingId,
+        return { kind = kind, style = style, reason = reason, owner = swing.owner, life = swing.life, swingId = swing.swingId,
             direction = swing.direction, position = position, startedAt = swing.startedAt, hitAt = swing.hitAt,
             expiresAt = swing.expiresAt, readyAt = if state then state.readyAt else 0 }
     end
@@ -57,6 +57,7 @@ function MeleeService.new(ports: Ports, config: SwordSwing.Config)
                     if seen[target] or state.swing ~= swing or not state.alive then continue end
                     seen[target] = true
                     local damaged = ports.damage(owner, target, config.damage)
+                    if damaged == true and state.swing == swing and state.alive and ports.onHit then ports.onHit(owner, target, now) end
                     local point = if damaged == true and ports.impact then ports.impact(target) else nil
                     if point and state.swing == swing and state.alive then
                         contacts += 1

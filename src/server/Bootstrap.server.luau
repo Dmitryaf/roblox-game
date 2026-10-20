@@ -14,6 +14,8 @@ local MeleeGateway = require(script.Parent.adapters.networking.MeleeGateway)
 local MeleeService = require(script.Parent.application.combat.MeleeService)
 local SwordWorld = require(script.Parent.adapters.world.SwordWorld)
 local WarriorConfig = require(script.Parent.config.Warrior)
+local HeavyConfig = require(script.Parent.config.Heavy)
+local HeavyStrikeService = require(script.Parent.application.combat.HeavyStrikeService)
 local DashConfig = require(script.Parent.config.Dash)
 local DashService = require(script.Parent.application.combat.DashService)
 local DashGateway = require(script.Parent.adapters.networking.DashGateway)
@@ -40,7 +42,7 @@ local function remote(name: string): RemoteEvent
 end
 local arrowRemote, matchRemote, handsRemote = remote("ArrowRemote"), remote("MatchRemote"), remote("HandsRemote")
 local classRemote, meleeRemote = remote("ClassRemote"), remote("MeleeRemote")
-local dashRemote = remote("DashRemote")
+local dashRemote, heavyRemote = remote("DashRemote"), remote("HeavyRemote")
 local now = function() return workspace:GetServerTimeNow() end
 local matches: any
 local world = World.new(arena, function(owner) return matches.context(owner) end,
@@ -68,7 +70,12 @@ local melee = MeleeService.new({ alive = world.alive, origin = world.origin, fac
     emit = function(event) meleeRemote:FireAllClients(event) end }, WarriorConfig)
 local dash = DashService.new({ alive = world.alive, start = world.startDash, stop = world.stopDash,
     emit = function(event) dashRemote:FireAllClients(event) end }, DashConfig)
-combat = ClassCombat.new(WarlockCombat.new(arrow, hands), melee, classes.get, dash)
+local heavy = HeavyStrikeService.new({ alive = world.alive, origin = world.origin, face = world.face,
+    targets = sword.targets, damage = world.damage, impact = sword.impact,
+    token = world.slowToken, targetOwner = world.targetOwner,
+    slow = function(target, multiplier) world.slow(target, multiplier, "heavy") end,
+    emit = function(event) heavyRemote:FireAllClients(event) end }, HeavyConfig)
+combat = ClassCombat.new(WarlockCombat.new(arrow, hands), melee, classes.get, dash, heavy)
 runtime = Runtime.new(combat, world, arena, now, Config.respawn, classes)
 matches = MatchService.new({ reset = runtime.reset, freeze = runtime.freeze }, Fixture.config(MatchConfig))
 local guarded = MatchCombat.new(combat, matches, runtime.tick, world.attackReason)
@@ -78,10 +85,11 @@ local handsGateway = HandsGateway.new(handsRemote, { cast = guarded.castHands, s
 local classGateway = ClassGateway.new(classRemote, classes, now)
 local meleeGateway = MeleeGateway.new(meleeRemote, { cast = guarded.swing, snapshot = guarded.meleeSnapshot }, now)
 local dashGateway = DashGateway.new(dashRemote, { cast = guarded.dash, snapshot = guarded.dashSnapshot }, now)
-runtime.start(matches, arrowGateway, matchGateway, handsGateway, classGateway, meleeGateway, dashGateway)
+local heavyGateway = MeleeGateway.new(heavyRemote, { cast = guarded.heavyStrike, snapshot = guarded.heavySnapshot }, now)
+runtime.start(matches, arrowGateway, matchGateway, handsGateway, classGateway, meleeGateway, dashGateway, heavyGateway)
 local stopFixture = Fixture.attach(matches, world, now)
 game:BindToClose(function()
     runtime.destroy()
     stopFixture()
-    arrowRemote:Destroy(); matchRemote:Destroy(); handsRemote:Destroy(); classRemote:Destroy(); meleeRemote:Destroy(); dashRemote:Destroy(); arena.folder:Destroy()
+    arrowRemote:Destroy(); matchRemote:Destroy(); handsRemote:Destroy(); classRemote:Destroy(); meleeRemote:Destroy(); dashRemote:Destroy(); heavyRemote:Destroy(); arena.folder:Destroy()
 end)
