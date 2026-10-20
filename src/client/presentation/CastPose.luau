@@ -1,35 +1,120 @@
 --!strict
--- Local procedural overlay; the base Roblox locomotion remains active.
+-- Local full-body overlay; Roblox locomotion and the authoritative root remain active.
 local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
 local CastPose = {}
-function CastPose.new()
-	local poses: { [number]: { joint: Motor6D, base: CFrame, started: number, release: number } } = {}
+type AnimationJoint = Motor6D | AnimationConstraint
+type Joint = { motor: AnimationJoint, rest: CFrame, raised: Vector3, charge: Vector3, focus: Vector3, release: Vector3,
+	breath: Vector3, lastBase: CFrame?, lastApplied: CFrame? }
+type Pose = { character: Model, joints: { Joint }, started: number, release: number }
+local RELEASE = 0.05
+local RECOVERY = 0.4
+local function radians(x: number, y: number, z: number): Vector3 return Vector3.new(math.rad(x), math.rad(y), math.rad(z)) end
+local function smooth(t: number): number t = math.clamp(t, 0, 1); return t * t * (3 - 2 * t) end
+local function setTransform(joint: AnimationJoint, value: CFrame)
+	if joint:IsA("Motor6D") then joint.Transform = value else (joint :: AnimationConstraint).Transform = value end
+end
+function CastPose.new(clock: (() -> number)?)
+	local readClock = clock or function(): number return workspace:GetServerTimeNow() end
+	local poses: { [number]: Pose } = {}
 	local pose = {}
 	function pose.stop(owner: number)
 		local current = poses[owner]
-		if current and current.joint.Parent then current.joint.C0 = current.base end
+		if current then
+			for _, joint in current.joints do
+				-- Animator may have written a new pose since our last update. Preserve that value.
+				if joint.motor.Parent and joint.lastApplied and joint.motor.Transform == joint.lastApplied and joint.lastBase then
+					setTransform(joint.motor, joint.lastBase)
+				end
+			end
+		end
 		poses[owner] = nil
 	end
-	function pose.begin(owner: number, release: number)
+	function pose.begin(owner: number, release: number, direction: Vector3?, startedAt: number?)
 		pose.stop(owner)
 		local player = Players:GetPlayerByUserId(owner)
 		local character = if player then player.Character else nil
 		if not character then return end
-		local joint = character:FindFirstChild("RightShoulder", true) or character:FindFirstChild("Right Shoulder", true)
-		if joint and joint:IsA("Motor6D") then
-			poses[owner] = { joint = joint, base = joint.C0, started = workspace:GetServerTimeNow(), release = release }
+		local root = character:FindFirstChild("HumanoidRootPart")
+		local segmentedArms = character:FindFirstChild("UpperTorso") ~= nil
+		local pitch, yaw = 0, 0
+		if direction and direction.Magnitude > 0.1 and root and root:IsA("BasePart") then
+			local localDirection = root.CFrame:VectorToObjectSpace(direction.Unit)
+			pitch = math.clamp(math.asin(math.clamp(localDirection.Y, -1, 1)), -0.4, 0.6)
+			yaw = math.clamp(math.atan2(-localDirection.X, -localDirection.Z), -0.5, 0.5)
 		end
+		local joints: { Joint } = {}
+		local descendants = character:GetDescendants()
+		local function add(names: { string }, raised: Vector3, charge: Vector3, released: Vector3, focus: Vector3?, breath: Vector3?)
+			for _, candidate in descendants do
+				if not candidate:IsA("Motor6D") and not candidate:IsA("AnimationConstraint") then continue end
+				for _, name in names do
+					local attachment = if candidate:IsA("AnimationConstraint") then candidate.Attachment0 else nil
+					if candidate.Name ~= name and not (attachment and attachment.Name == name .. "RigAttachment") then continue end
+					-- The attachment frame is the upgraded rig's read-only equivalent of C0.
+					local rest = if candidate:IsA("Motor6D") then candidate.C0.Rotation else if attachment then attachment.CFrame.Rotation else CFrame.identity
+					table.insert(joints, { motor = candidate, rest = rest, raised = raised, charge = charge, focus = focus or charge,
+						release = released, breath = breath or Vector3.zero })
+					return
+				end
+			end
+		end
+		-- Both hands rise directly toward the sternum and remain there to gather power.
+		-- The final aim is a small head movement, not an early throwing gesture.
+		add({ "Waist", "RootJoint" }, radians(-3, -4, 0), radians(-7, -7, 0), radians(-12, 7, 1),
+			Vector3.new(math.rad(-6), yaw * 0.25, 0), radians(0.65, 0, 0))
+		add({ "Neck" }, radians(-10, 3, 0), radians(-17, 5, 0), Vector3.new(pitch * 0.55, yaw * 0.65, 0),
+			Vector3.new(pitch * 0.55, yaw * 0.65, 0), radians(-0.25, 0, 0))
+		local raisedArm, heldArm = if segmentedArms then 40 else 58, if segmentedArms then 54 else 78
+		add({ "RightShoulder", "Right Shoulder" }, radians(raisedArm, -10, -10), radians(heldArm, -12, -25),
+			Vector3.new(math.rad(104) + pitch, yaw, math.rad(6)), nil, radians(0.35, 0, 0))
+		add({ "LeftShoulder", "Left Shoulder" }, radians(raisedArm, 10, 10), radians(heldArm, 12, 25), radians(65, 5, 16), nil, radians(0.35, 0, 0))
+		add({ "RightElbow" }, radians(58, 0, 0), radians(92, 0, 0), radians(8, 0, 0))
+		add({ "LeftElbow" }, radians(58, 0, 0), radians(92, 0, 0), radians(48, 0, 0))
+		add({ "RightWrist" }, radians(-8, 0, 6), radians(-16, -8, 12), radians(17, 0, -5))
+		add({ "LeftWrist" }, radians(-8, 0, -6), radians(-16, 8, -12), radians(-4, 0, -6))
+		poses[owner] = { character = character, joints = joints, started = math.min(startedAt or readClock(), release - 0.06), release = release }
 	end
 	function pose.step(now: number)
 		for owner, current in poses do
-			if not current.joint.Parent or now > current.release + 0.24 then pose.stop(owner); continue end
-			local t = if now < current.release then math.clamp((now - current.started) / 0.2, 0, 1)
-				else 1 - math.clamp((now - current.release) / 0.24, 0, 1)
-			local weight = t * t * (3 - 2 * t)
-			current.joint.C0 = current.base * CFrame.Angles(math.rad(-72) * weight, 0, math.rad(16) * weight)
+			local player = Players:GetPlayerByUserId(owner)
+			local humanoid = current.character:FindFirstChildOfClass("Humanoid")
+			if not player or player.Character ~= current.character or not humanoid or humanoid.Health <= 0 or now >= current.release + RELEASE + RECOVERY then
+				pose.stop(owner); continue
+			end
 		end
 	end
+	-- Animator runs before PreSimulation. RenderStepped is too early to own this overlay.
+	local simulation = RunService.PreSimulation:Connect(function()
+		local now = readClock()
+		pose.step(now)
+		for _, current in poses do
+			local preparing = now < current.release
+			local progress = math.clamp((now - current.started) / math.max(0.06, current.release - current.started), 0, 1)
+			local rise = smooth(progress / 0.32)
+			local gather = smooth((progress - 0.32) / 0.2)
+			local focus = smooth((progress - 0.72) / 0.24)
+			local breath = math.sin((now - current.started) * 4) * smooth((progress - 0.52) / 0.12) * (1 - smooth((progress - 0.9) / 0.1))
+			local snap = smooth((now - current.release) / RELEASE)
+			local recovery = 1 - smooth((now - current.release - RELEASE) / RECOVERY)
+			for _, joint in current.joints do
+				if not joint.motor.Parent then continue end
+				local held = joint.charge:Lerp(joint.focus, focus)
+				local gathered = joint.raised:Lerp(held, gather) + joint.breath * breath
+				local angles = if preparing then if progress < 0.32 then joint.raised * rise else gathered
+					else joint.focus:Lerp(joint.release, snap) * recovery
+				local base = joint.motor.Transform
+				-- Unanimated joints retain our previous value; remove that overlay before applying the next.
+				if joint.lastApplied and base == joint.lastApplied and joint.lastBase then base = joint.lastBase end
+				local parentRotation = CFrame.Angles(angles.X, angles.Y, angles.Z)
+				local localRotation = joint.rest:Inverse() * parentRotation * joint.rest
+				setTransform(joint.motor, localRotation * base)
+				joint.lastBase, joint.lastApplied = base, joint.motor.Transform
+			end
+		end
+	end)
 	function pose.destroy()
+		simulation:Disconnect()
 		for owner in poses do pose.stop(owner) end
 	end
 	return pose
