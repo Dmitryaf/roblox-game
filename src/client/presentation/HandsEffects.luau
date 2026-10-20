@@ -96,7 +96,7 @@ function HandsEffects.new(casting: Casting)
 	end
 	local function update(entry: Entry, now: number)
 		local event = entry.event
-		local started = event.startedAt or event.launchAt - 0.8
+		local started = event.transferStartedAt or event.startedAt or event.launchAt - 0.8
 		local progress = math.clamp((now - started) / math.max(0.01, event.launchAt - started), 0, 1)
 		local age = math.max(0, now - event.launchAt)
 		local fading = if entry.active then math.clamp((now - event.expiresAt + 0.35) / 0.35, 0, 1) else 0
@@ -129,11 +129,14 @@ function HandsEffects.new(casting: Casting)
 			if entry then remove(id, not entry.active or cancelled) end
 			return
 		end
-		if event.kind ~= "preparing" and event.kind ~= "active" then return end
+		if event.kind ~= "preparing" and event.kind ~= "active" and event.kind ~= "transferring" then return end
 		local now = workspace:GetServerTimeNow()
 		if now >= event.expiresAt or retired[id] then return end
 		local preparing = event.kind == "preparing"
-		local previous = areas[id]
+		local previous: Entry? = areas[id]
+        if previous and event.transferStartedAt and previous.event.position ~= event.position then
+            previous.root:Destroy(); areas[id] = nil; previous = nil
+        end
 		if previous and previous.active and preparing then return end
 		local beginPose = preparing and previous == nil
 		local entry: Entry = previous or create(folder, event)

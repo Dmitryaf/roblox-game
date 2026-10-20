@@ -18,7 +18,19 @@ function DashEffects.new(sharedPose: any?)
 	folder.Name, folder.Parent = "LocalDashEffects", workspace
 	local retired: { [number]: number } = {}
 	local stopped, lastStep = false, 0
+	local previewId: number? = nil
 	local effects = {}
+	function effects.preview(requestId: number, life: number, direction: Vector3): boolean
+		if stopped then return false end
+		local owner = Players.LocalPlayer.UserId
+		if not pose.previewDash(owner, requestId, life, direction) then return false end
+		previewId = requestId
+		return true
+	end
+	function effects.cancelPreview(requestId: number?)
+		pose.cancelPreview(Players.LocalPlayer.UserId, "dash", requestId)
+		if requestId == nil or previewId == requestId then previewId = nil end
+	end
 	local function clearGround(id: number)
 		local ground = grounds[id]
 		if ground then ground.effect.destroy(); grounds[id] = nil end
@@ -54,14 +66,15 @@ function DashEffects.new(sharedPose: any?)
 		end
 		if event.kind ~= "started" or retired[id] or entries[id] then return end
 		-- Restoring a snapshot never replays a completed dash or its launch sound.
-		if quiet and now >= event.expiresAt then return end
+		local matchingPreview = previewId ~= nil and event.requestId == previewId and event.owner == Players.LocalPlayer.UserId
+		if quiet and now >= event.expiresAt and not matchingPreview then return end
 		if not quiet and now - event.expiresAt > 0.35 then return end
 		local player = Players:GetPlayerByUserId(event.owner)
 		local character = if player then player.Character else nil
 		local humanoid = if character then character:FindFirstChildOfClass("Humanoid") else nil
 		local root = if character then character:FindFirstChild("HumanoidRootPart") else nil
 		if not character or not humanoid or humanoid.Health <= 0 or not root or not root:IsA("BasePart") then return end
-		if character:GetAttribute("CombatClass") ~= "warrior" then return end
+		if character:GetAttribute("CombatClass") ~= "warrior" or character:GetAttribute("CombatLife") ~= event.life then return end
 		for oldId, old in entries do
 			if old.event.owner == event.owner then remove(oldId) end
 		end
@@ -76,7 +89,8 @@ function DashEffects.new(sharedPose: any?)
 		if count >= 6 and oldestId then clearGround(oldestId) end
 		grounds[id] = { effect = Rupture.new(folder, character, root, event.direction, id, quiet), event = event,
 			character = character, humanoid = humanoid, root = root, started = now }
-		if not quiet then pose.beginDash(event.owner, event.duration or 0.28, event.direction, id) end
+		if not quiet or matchingPreview then pose.beginDash(event.owner, event.duration or 0.28, event.direction, id, event.requestId) end
+		if matchingPreview then previewId = nil end
 		-- Native trails follow replicated movement rather than the server's old start position.
 		local nodes: { Attachment }, trails: { Trail } = {}, {}
 		for _, side in { -1, 1 } do
@@ -151,6 +165,7 @@ function DashEffects.new(sharedPose: any?)
 	end)
 	function effects.destroy()
 		if stopped then return end
+		effects.cancelPreview()
 		stopped = true
 		heartbeat:Disconnect()
 		for id in entries do remove(id) end

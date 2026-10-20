@@ -1,7 +1,7 @@
 --!strict
 export type Config = { windup: number, recovery: number, cooldown: number, range: number, arcDegrees: number, damage: number }
 export type Swing = { owner: number, life: number, swingId: number, direction: Vector3, startedAt: number,
-    hitAt: number, expiresAt: number, kind: string }
+    hitAt: number, expiresAt: number, kind: string, requestId: number? }
 export type State = { life: number, alive: boolean, readyAt: number, swing: Swing? }
 local SwordSwing = {}
 function SwordSwing.new(life: number): State return { life = life, alive = true, readyAt = 0 } end

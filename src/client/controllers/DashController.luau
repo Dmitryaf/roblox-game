@@ -27,6 +27,7 @@ function DashController.start(player: Player, remote: RemoteEvent, hud: any, eff
 	local syncId: number? = nil
 	local lastSync, lastDraw = 0, -1
 	local note, noteUntil = "", 0
+	local latestCastRequest = 0
 	local ownerLives: { [number]: number } = {}
 	local latest: { [number]: number } = {}
 	local retired: { [number]: number } = {}
@@ -35,12 +36,17 @@ function DashController.start(player: Player, remote: RemoteEvent, hud: any, eff
 		return player.Character ~= nil and player.Character:GetAttribute("CombatClass") == "warrior"
 	end
 	local function send(action: string, direction: Vector3?)
-		if action ~= "sync" and (not warrior() or not synced or not alive or suspended or recovering or pending) then return end
+		if action ~= "sync" and (not warrior() or not synced or not alive or suspended or recovering or pending
+			or now() < readyAt or (dashId ~= nil and now() < expiresAt)) then return end
+		local characterLife = if player.Character then player.Character:GetAttribute("CombatLife") else nil
+		if action ~= "sync" and type(characterLife) == "number" and characterLife ~= life then return end
 		requestId += 1
 		local message: any = { action = action, requestId = requestId, life = life }
 		if action == "cast" then
+			if effects.preview and not effects.preview(requestId, life, direction) then return end
 			message.direction = direction
 			pending = { id = requestId, life = life, at = now() }
+			latestCastRequest = requestId
 			note, noteUntil = "", 0
 		else syncId, lastSync = requestId, now() end
 		remote:FireServer(message)
@@ -51,7 +57,11 @@ function DashController.start(player: Player, remote: RemoteEvent, hud: any, eff
 	end
 	local function snapshot(state: any): boolean
 		if type(state) ~= "table" or type(state.life) ~= "number" or state.life < life then return false end
-		if state.life ~= life then pending = nil; note, noteUntil = "", 0 end
+		if state.life ~= life or not state.alive or state.suspended then
+			if effects.cancelPreview then effects.cancelPreview() end
+			pending = nil
+			if state.life ~= life then latestCastRequest = 0; note, noteUntil = "", 0 end
+		end
 		life, alive, suspended, readyAt = state.life, state.alive == true, state.suspended == true, state.readyAt
 		if recovering then note, noteUntil = "Состояние обновлено. Повторите рывок.", now() + 2.5 end
 		synced, recovering = life > 0, false
@@ -64,6 +74,7 @@ function DashController.start(player: Player, remote: RemoteEvent, hud: any, eff
 		for _, event in state.active do
 			if not eligible(event) then continue end
 			if event.owner == player.UserId and (not alive or suspended) then continue end
+			if event.owner == player.UserId and type(event.requestId) == "number" and event.requestId < latestCastRequest then continue end
 			latest[event.owner] = event.dashId
 			table.insert(active, event)
 			if event.owner == player.UserId and alive and not suspended then dashId, expiresAt = event.dashId, event.expiresAt end
@@ -83,6 +94,9 @@ function DashController.start(player: Player, remote: RemoteEvent, hud: any, eff
 			if syncReply then syncId = nil end
 			if actionReply then
 				pending = nil
+				-- A matching active snapshot has already adopted the brace. Otherwise
+				-- remove only the unconfirmed preview, including an already expired success.
+				if effects.cancelPreview then effects.cancelPreview(event.requestId) end
 				if not event.ok and requestedLife == life and (event.life == nil or event.life == life) then
 					note, noteUntil = reasons[event.reason] or "Рывок отклонён. Повторите попытку.", now() + 3
 				end
@@ -92,6 +106,7 @@ function DashController.start(player: Player, remote: RemoteEvent, hud: any, eff
 		if event.kind ~= "started" and event.kind ~= "ended" then return end
 		if event.owner == player.UserId then
 			if not synced or event.life ~= life then return end
+			if event.kind == "started" and type(event.requestId) == "number" and event.requestId < latestCastRequest then return end
 		else
 			if event.life < (ownerLives[event.owner] or 0) then return end
 			ownerLives[event.owner] = event.life
@@ -115,9 +130,14 @@ function DashController.start(player: Player, remote: RemoteEvent, hud: any, eff
 	local frame = RunService.RenderStepped:Connect(function()
 		local time = now()
 		effects.step(time)
+		if pending and not warrior() then
+			if effects.cancelPreview then effects.cancelPreview(pending.id) end
+			pending = nil
+		end
 		for id, expires in retired do if time >= expires then retired[id] = nil end end
 		if (not synced or recovering) and time - lastSync > 2 then send("sync", nil) end
 		if pending and time - pending.at > 2.5 then
+			if effects.cancelPreview then effects.cancelPreview(pending.id) end
 			pending, recovering = nil, true
 			note, noteUntil = "Нет подтверждения сервера. Обновляем состояние…", time + 4
 			send("sync", nil)
@@ -134,6 +154,7 @@ function DashController.start(player: Player, remote: RemoteEvent, hud: any, eff
 	send("sync", nil)
 	return function()
 		unbind(); connection:Disconnect(); frame:Disconnect()
+		if effects.cancelPreview then effects.cancelPreview() end
 		effects.destroy(); hud.destroy()
 	end
 end

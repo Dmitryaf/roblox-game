@@ -7,7 +7,7 @@ function HeavyStrikeService.new(ports: any, config: any)
     local slows = TimedSlow.new({ alive = ports.alive, token = ports.token,
         owner = ports.targetOwner, apply = ports.slow })
     local strike = MeleeService.new({ alive = ports.alive, origin = ports.origin, face = ports.face,
-        targets = ports.targets, damage = ports.damage, impact = ports.impact, emit = ports.emit,
+        targets = ports.targets, damage = ports.damage, impact = ports.impact, reaction = ports.reaction, emit = ports.emit,
         onHit = function(owner, target, now) slows.hit(owner, target, config.slowMultiplier, config.slowDuration, now) end,
     }, config, "heavy")
     return {

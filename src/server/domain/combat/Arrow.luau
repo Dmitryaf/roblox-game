@@ -2,7 +2,7 @@
 -- Pure lifecycle; no Instances, clocks, networking or spatial authority here.
 export type Cast = {
 	id: number, owner: number, life: number,
-	launchAt: number, expiresAt: number, phase: string,
+	launchAt: number, expiresAt: number, phase: string, requestId: number?,
 }
 export type State = {
 	life: number, alive: boolean, readyAt: number, cast: Cast?,

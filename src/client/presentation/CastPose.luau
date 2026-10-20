@@ -6,7 +6,7 @@ local CastPose = {}
 type AnimationJoint = Motor6D | AnimationConstraint
 type Joint = { motor: AnimationJoint, rest: CFrame, raised: Vector3, charge: Vector3, focus: Vector3, release: Vector3,
 	breath: Vector3, lastBase: CFrame?, lastApplied: CFrame? }
-type Pose = { character: Model, joints: { Joint }, started: number, release: number }
+type Pose = { character: Model, joints: { Joint }, started: number, release: number, life: any, preview: boolean?, requestId: number?, timeline: any? }
 local RELEASE = 0.05
 local RECOVERY = 0.4
 local function radians(x: number, y: number, z: number): Vector3 return Vector3.new(math.rad(x), math.rad(y), math.rad(z)) end
@@ -14,7 +14,7 @@ local function smooth(t: number): number t = math.clamp(t, 0, 1); return t * t *
 local function setTransform(joint: AnimationJoint, value: CFrame)
 	if joint:IsA("Motor6D") then joint.Transform = value else (joint :: AnimationConstraint).Transform = value end
 end
-function CastPose.new(clock: (() -> number)?)
+function CastPose.new(clock: (() -> number)?, manualFrames: boolean?)
 	local readClock = clock or function(): number return workspace:GetServerTimeNow() end
 	local poses: { [number]: Pose } = {}
 	local pose = {}
@@ -30,7 +30,13 @@ function CastPose.new(clock: (() -> number)?)
 		end
 		poses[owner] = nil
 	end
-	function pose.begin(owner: number, release: number, direction: Vector3?, startedAt: number?)
+	function pose.begin(owner: number, release: number, direction: Vector3?, startedAt: number?, requestId: number?)
+        local current = poses[owner]
+        if current and current.preview and current.requestId == requestId then
+            current.timeline.confirm(readClock(), release)
+            current.started, current.release, current.preview = startedAt or current.started, release, false
+            return
+        end
 		pose.stop(owner)
 		local player = Players:GetPlayerByUserId(owner)
 		local character = if player then player.Character else nil
@@ -73,24 +79,54 @@ function CastPose.new(clock: (() -> number)?)
 		add({ "LeftElbow" }, radians(58, 0, 0), radians(92, 0, 0), radians(48, 0, 0))
 		add({ "RightWrist" }, radians(-8, 0, 6), radians(-16, -8, 12), radians(17, 0, -5))
 		add({ "LeftWrist" }, radians(-8, 0, -6), radians(-16, 8, -12), radians(-4, 0, -6))
-		poses[owner] = { character = character, joints = joints, started = math.min(startedAt or readClock(), release - 0.06), release = release }
+		poses[owner] = { character = character, joints = joints, started = math.min(startedAt or readClock(), release - 0.06), release = release, life = character:GetAttribute("CombatLife") }
 	end
+    function pose.preview(owner: number, requestId: number, life: number, direction: Vector3): boolean
+        if poses[owner] then return false end
+        local player = Players:GetPlayerByUserId(owner)
+        if not player or not player.Character or player.Character:GetAttribute("CombatLife") ~= life then return false end
+        local now = readClock()
+        pose.begin(owner, math.huge, direction, now)
+        local current = poses[owner]
+        if not current then return false end
+        local Timeline = require(script.Parent.PreparationTimeline)
+        current.preview, current.requestId, current.timeline = true, requestId, Timeline.new(now)
+        return true
+    end
+    function pose.cancelPreview(owner: number, requestId: number?)
+        local current = poses[owner]
+        if current and current.preview and (requestId == nil or current.requestId == requestId) then pose.stop(owner) end
+    end
+    function pose.active(owner: number): boolean return poses[owner] ~= nil end
 	function pose.step(now: number)
 		for owner, current in poses do
 			local player = Players:GetPlayerByUserId(owner)
 			local humanoid = current.character:FindFirstChildOfClass("Humanoid")
-			if not player or player.Character ~= current.character or not humanoid or humanoid.Health <= 0 or now >= current.release + RELEASE + RECOVERY then
+			local root = current.character:FindFirstChild("HumanoidRootPart")
+			if not player or player.Character ~= current.character or not humanoid or humanoid.Health <= 0 or now >= current.release + RELEASE + RECOVERY
+                or current.character:GetAttribute("CombatLife") ~= current.life
+                or (current.preview and now - current.started >= 2.5)
+                or not root or not root:IsA("BasePart") or root.Anchored then
 				pose.stop(owner); continue
 			end
 		end
 	end
 	-- Animator runs before PreSimulation. RenderStepped is too early to own this overlay.
-	local simulation = RunService.PreSimulation:Connect(function()
-		local now = readClock()
+    function pose.beforePose()
+        for _, current in poses do
+            for _, joint in current.joints do
+                if joint.motor.Parent and joint.lastApplied and joint.motor.Transform == joint.lastApplied and joint.lastBase then setTransform(joint.motor, joint.lastBase) end
+                joint.lastApplied = nil
+            end
+        end
+    end
+    function pose.afterPose(now: number)
+
 		pose.step(now)
 		for _, current in poses do
 			local preparing = now < current.release
-			local progress = math.clamp((now - current.started) / math.max(0.06, current.release - current.started), 0, 1)
+			local progress = if current.timeline and preparing then current.timeline.progress(now)
+                else math.clamp((now - current.started) / math.max(0.06, current.release - current.started), 0, 1)
 			local rise = smooth(progress / 0.32)
 			local gather = smooth((progress - 0.32) / 0.2)
 			local focus = smooth((progress - 0.72) / 0.24)
@@ -112,9 +148,11 @@ function CastPose.new(clock: (() -> number)?)
 				joint.lastBase, joint.lastApplied = base, joint.motor.Transform
 			end
 		end
-	end)
+    end
+    local simulation: RBXScriptConnection? = nil
+    if not manualFrames then simulation = RunService.PreSimulation:Connect(function() pose.afterPose(readClock()) end) end
 	function pose.destroy()
-		simulation:Disconnect()
+        if simulation then simulation:Disconnect() end
 		for owner in poses do pose.stop(owner) end
 	end
 	return pose

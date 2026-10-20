@@ -17,7 +17,7 @@ function Requests.valid(value: any): boolean
 	end
 	if not integer(value.requestId) or not integer(value.life) then return false end
 	if value.action == "sync" then return value.direction == nil and value.castId == nil end
-	if value.action == "teleport" then return integer(value.castId) and value.direction == nil end
+	if value.action == "teleport" or value.action == "transfer" then return integer(value.castId) and value.direction == nil end
 	if value.action ~= "cast" or value.castId ~= nil or typeof(value.direction) ~= "Vector3" then return false end
 	local v = value.direction
 	for _, n in { v.X, v.Y, v.Z } do

@@ -3,7 +3,7 @@ local ContextActionService = game:GetService("ContextActionService")
 local UserInputService = game:GetService("UserInputService")
 local GuiService = game:GetService("GuiService")
 local ArrowInput = {}
-function ArrowInput.bind(player: Player, cast: (Vector3) -> (), teleport: () -> ())
+function ArrowInput.bind(player: Player, cast: (Vector3) -> (), teleport: () -> (), transfer: (() -> ())?)
 	local function onCast(_: string, state: Enum.UserInputState)
 		if state ~= Enum.UserInputState.Begin or UserInputService:GetFocusedTextBox() then return Enum.ContextActionResult.Pass end
 		local camera = workspace.CurrentCamera
@@ -37,9 +37,18 @@ function ArrowInput.bind(player: Player, cast: (Vector3) -> (), teleport: () -> 
 		teleport()
 		return Enum.ContextActionResult.Sink
 	end, false, Enum.KeyCode.E)
+    if transfer then
+        ContextActionService:BindAction("TransferHands", function(_, state)
+            if state ~= Enum.UserInputState.Begin or UserInputService:GetFocusedTextBox() then return Enum.ContextActionResult.Pass end
+            if not player.Character or player.Character:GetAttribute("CombatClass") ~= "warlock" then return Enum.ContextActionResult.Pass end
+            transfer()
+            return Enum.ContextActionResult.Sink
+        end, false, Enum.KeyCode.F)
+    end
 	return function()
 		ContextActionService:UnbindAction("CastArrow")
 		ContextActionService:UnbindAction("TeleportArrow")
+        if transfer then ContextActionService:UnbindAction("TransferHands") end
 	end
 end
 return ArrowInput

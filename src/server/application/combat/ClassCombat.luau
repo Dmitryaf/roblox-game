@@ -13,9 +13,13 @@ function ClassCombat.new(warlock: any, melee: any, selected: (number) -> string,
         snapshot = warlock.snapshot, handsSnapshot = warlock.handsSnapshot, meleeSnapshot = melee.snapshot,
         dashSnapshot = dash.snapshot,
         heavySnapshot = if heavy then heavy.snapshot else nil,
-        cast = function(owner: number, life: number, direction: Vector3, now: number): (boolean, string?)
+        cast = function(owner: number, life: number, direction: Vector3, now: number, requestId: number?): (boolean, string?)
             if selected(owner) ~= "warlock" then return false, "wrong_class" end
-            return warlock.cast(owner, life, direction, now)
+            return warlock.cast(owner, life, direction, now, requestId)
+        end,
+        transferHands = function(owner: number, life: number, castId: number, now: number): (boolean, string?)
+            if selected(owner) ~= "warlock" then return false, "wrong_class" end
+            return warlock.transferHands(owner, life, castId, now)
         end,
         teleport = function(owner: number, life: number, castId: number, now: number): (boolean, string?)
             if selected(owner) ~= "warlock" then return false, "wrong_class" end
@@ -25,7 +29,7 @@ function ClassCombat.new(warlock: any, melee: any, selected: (number) -> string,
             if selected(owner) ~= "warlock" then return false, "wrong_class" end
             return warlock.castHands(owner, life, position, now)
         end,
-        swing = function(owner: number, life: number, direction: Vector3, now: number): (boolean, string?)
+        swing = function(owner: number, life: number, direction: Vector3, now: number, requestId: number?): (boolean, string?)
             if selected(owner) ~= "warrior" then return false, "wrong_class" end
             dash.step(now)
             for _, active in dash.snapshot(owner).active do
@@ -37,9 +41,9 @@ function ClassCombat.new(warlock: any, melee: any, selected: (number) -> string,
                     if active.owner == owner then return false, "busy" end
                 end
             end
-            return melee.cast(owner, life, direction, now)
+            return melee.cast(owner, life, direction, now, requestId)
         end,
-        heavyStrike = function(owner: number, life: number, direction: Vector3, now: number): (boolean, string?)
+        heavyStrike = function(owner: number, life: number, direction: Vector3, now: number, requestId: number?): (boolean, string?)
             if selected(owner) ~= "warrior" then return false, "wrong_class" end
             if not heavy then return false, "not_ready" end
             melee.step(now); dash.step(now)
@@ -49,9 +53,9 @@ function ClassCombat.new(warlock: any, melee: any, selected: (number) -> string,
             for _, active in dash.snapshot(owner).active do
                 if active.owner == owner then return false, "busy" end
             end
-            return heavy.cast(owner, life, direction, now)
+            return heavy.cast(owner, life, direction, now, requestId)
         end,
-        dash = function(owner: number, life: number, direction: Vector3, now: number): (boolean, string?)
+        dash = function(owner: number, life: number, direction: Vector3, now: number, requestId: number?): (boolean, string?)
             if selected(owner) ~= "warrior" then return false, "wrong_class" end
             melee.step(now)
             for _, active in melee.snapshot(owner).active do
@@ -63,7 +67,7 @@ function ClassCombat.new(warlock: any, melee: any, selected: (number) -> string,
                     if active.owner == owner then return false, "busy" end
                 end
             end
-            return dash.cast(owner, life, direction, now)
+            return dash.cast(owner, life, direction, now, requestId)
         end,
     }
 end

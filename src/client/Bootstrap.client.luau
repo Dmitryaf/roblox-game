@@ -26,13 +26,29 @@ local DashInput = require(script.Parent.input.DashInput)
 local DashMotion = require(script.Parent.presentation.DashMotion)
 local WarriorPose = require(script.Parent.presentation.MeleePose)
 local WarriorAppearance = require(script.Parent.presentation.WarriorAppearance)
+local CastPose = require(script.Parent.presentation.CastPose)
+local PoseLayers = require(script.Parent.presentation.PoseLayers)
+local ClassLocomotion = require(script.Parent.presentation.ClassLocomotion)
+local HitReaction = require(script.Parent.presentation.HitReaction)
 local player = Players.LocalPlayer
 local dashMotion = DashMotion.new(player)
-local warriorPose = WarriorPose.new()
+local warriorPose = WarriorPose.new(true)
+local castPose = CastPose.new(nil, true)
+local hitReaction = HitReaction.new()
+local locomotion = ClassLocomotion.new({ isActing = function(character: Model): boolean
+    local owner = Players:GetPlayerFromCharacter(character)
+    return owner ~= nil and (warriorPose.active(owner.UserId) or castPose.active(owner.UserId))
+end })
+local layers = PoseLayers.new({locomotion, warriorPose, castPose, hitReaction})
+local reactionConnections: { RBXScriptConnection } = {}
+local function observeReaction(remoteEvent: RemoteEvent)
+    table.insert(reactionConnections, remoteEvent.OnClientEvent:Connect(function(event: any) hitReaction.hit(event) end))
+end
 local remote = ReplicatedStorage:WaitForChild("ArrowRemote", 15)
 assert(remote and remote:IsA("RemoteEvent"), "Combat test server did not start; check Server Output.")
 local gui = player:WaitForChild("PlayerGui") :: PlayerGui
-local arrowEffects = Effects.new()
+observeReaction(remote)
+local arrowEffects = Effects.new(castPose)
 local stop = Controller.start(player, remote, Hud.new(gui), arrowEffects, Input.bind)
 local stopClass: (() -> ())? = nil
 local stopMelee: (() -> ())? = nil
@@ -47,9 +63,11 @@ if ReplicatedStorage:GetAttribute("MatchEnabled") == true then
     assert(classRemote and classRemote:IsA("RemoteEvent"), "Class server did not initialize")
     assert(meleeRemote and meleeRemote:IsA("RemoteEvent"), "Melee server did not initialize")
     stopClass = ClassController.start(player, classRemote, ClassHud.new(gui))
+    observeReaction(meleeRemote)
     stopMelee = MeleeController.start(player, meleeRemote, MeleeHud.new(gui), MeleeEffects.new(warriorPose), MeleeInput.bind)
     local heavyRemote = ReplicatedStorage:WaitForChild("HeavyRemote", 15)
     assert(heavyRemote and heavyRemote:IsA("RemoteEvent"), "Heavy strike server did not initialize")
+    observeReaction(heavyRemote)
     stopHeavy = MeleeController.start(player, heavyRemote, HeavyHud.new(gui),
         MeleeEffects.new(warriorPose, "heavy"), MeleeInput.bindHeavy, "heavy")
     local dashRemote = ReplicatedStorage:WaitForChild("DashRemote", 15)
@@ -66,6 +84,9 @@ if matchRemote and matchRemote:IsA("RemoteEvent") then
 	stopMatch = MatchController.start(player, matchRemote, MatchHud.new(gui))
 end
 script.Destroying:Connect(function()
+    layers.destroy()
+    for _, connection in reactionConnections do connection:Disconnect() end
+    hitReaction.destroy(); castPose.destroy(); locomotion.destroy()
 	dashMotion.destroy()
 	appearanceStep:Disconnect(); warrior.destroy()
 	if stopClass then stopClass() end

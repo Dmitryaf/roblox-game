@@ -25,7 +25,9 @@ function ArrowGateway.new(remote: RemoteEvent, service: any, now: () -> number)
 			if request.action == "sync" then gateway.sync(player); return end
 			local ok, reason
 			if request.action == "cast" then
-				ok, reason = service.cast(owner, request.life, request.direction.Unit, time)
+				ok, reason = service.cast(owner, request.life, request.direction.Unit, time, request.requestId)
+			elseif request.action == "transfer" then
+                ok, reason = service.transferHands(owner, request.life, request.castId, time)
 			else
 				ok, reason = service.teleport(owner, request.life, request.castId, time)
 			end

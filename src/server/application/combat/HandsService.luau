@@ -12,20 +12,28 @@ function HandsService.new(ports: Ports, config: Config)
     local states: { [number]: State } = {}
     local paused: { [number]: number } = {}
     local slowed: { [any]: boolean } = {}
+    local transfers: { [number]: { area: Area, fromPosition: Vector3, startedAt: number, readyAt: number } } = {}
     local sequence = 0
     local service = {}
     local function event(area: Area, kind: string, reason: string?): any
         local state = states[area.owner]
+        local pending = transfers[area.owner]
+        local transfer = if pending and pending.area == area then pending else nil
         return { kind = kind, reason = reason, owner = area.owner, life = area.life, areaId = area.areaId,
             position = area.position, radius = area.radius, startedAt = area.startedAt, launchAt = area.launchAt,
-            expiresAt = area.expiresAt, readyAt = if state then state.readyAt else 0 }
+            expiresAt = area.expiresAt, readyAt = if state then state.readyAt else 0,
+            fromPosition = if transfer then transfer.fromPosition else nil,
+            transferStartedAt = if transfer then transfer.startedAt else nil,
+            transferReadyAt = if transfer then transfer.readyAt else nil }
     end
     local function finish(owner: number, reason: string)
         local state = states[owner]
         if not state or not state.area then return end
         local area = state.area
         state.area = nil -- Remove before notifications or damage callbacks can re-enter.
-        ports.emit(event(area, "ended", reason))
+        local ended = event(area, "ended", reason)
+        transfers[owner] = nil
+        ports.emit(ended)
     end
     local function refreshSlow()
         local current: { [any]: boolean } = {}
@@ -71,11 +79,12 @@ function HandsService.new(ports: Ports, config: Config)
             if not ports.alive(owner) then service.die(owner); continue end
             -- A normal frame can cross the final tick and expiry together. Resolve at most
             -- that one final sample; a stalled frame beyond an interval cannot invent history.
-            if now > area.expiresAt + config.tickInterval or (now > area.expiresAt and area.kind == "preparing") then
+            local warming = area.kind ~= "active"
+            if now > area.expiresAt + config.tickInterval or (now > area.expiresAt and warming) then
                 finish(owner, "expired"); continue
             end
             if now >= area.launchAt then
-                if area.kind == "preparing" then
+                if area.kind == "preparing" or area.kind == "transferring" then
                     area.kind = "active"; ports.emit(event(area, "active", nil))
                 end
                 if HandArea.tick(area, math.min(now, area.expiresAt), config.tickInterval) then
@@ -114,6 +123,34 @@ function HandsService.new(ports: Ports, config: Config)
         end
         return { life = if state then state.life else 0, alive = state ~= nil and state.alive,
             suspended = paused[owner] ~= nil, readyAt = if state then state.readyAt else 0, active = active }
+    end
+    -- Planning does not tick or consume either resource. The combination owner commits
+    -- this closure immediately after detaching the arrow, without yielding or emitting.
+    function service.planTransfer(owner: number, life: number, position: Vector3, now: number): ((() -> ())?, string?)
+        if paused[owner] ~= nil then return nil, "paused" end
+        local state = states[owner]
+        if not state then return nil, "not_ready" end
+        if state.life ~= life then return nil, "stale_life" end
+        if not state.alive or not ports.alive(owner) then return nil, "dead" end
+        local area = state.area
+        if not area then return nil, "no_area" end
+        if now >= area.expiresAt then return nil, "expired" end
+        if area.kind ~= "active" then return nil, "busy" end
+        local readyAt = now + 0.35
+        if readyAt >= area.expiresAt then return nil, "expiring_area" end
+        local point, reason = ports.placement(owner, position, config.range, config.radius)
+        if not point then return nil, reason or "invalid_target" end
+        -- Placement ports are non-yielding, but reject a re-entrant lifecycle change.
+        if states[owner] ~= state or state.area ~= area or not state.alive or paused[owner] ~= nil then return nil, "stale_area" end
+        local function commit()
+            transfers[owner] = { area = area, fromPosition = area.position, startedAt = now, readyAt = readyAt }
+            area.position, area.kind = point, "transferring"
+            area.launchAt, area.nextTick = readyAt, readyAt + config.tickInterval
+            -- The same area/source owns both positions. No old slow contribution survives.
+            refreshSlow()
+            ports.emit(event(area, "transferring", nil))
+        end
+        return commit, nil
     end
     function service.destroy()
         for owner in states do service.leave(owner) end

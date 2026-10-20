@@ -4,7 +4,7 @@ type State = SwordSwing.State
 type Swing = SwordSwing.Swing
 export type Ports = { alive: (number) -> boolean, origin: (number) -> Vector3?, face: (number, Vector3) -> boolean,
     targets: (number, Vector3, number, number) -> { any }, damage: (number, any, number) -> boolean?,
-    impact: ((any) -> Vector3?)?, onHit: ((number, any, number) -> ())?, emit: (any) -> () }
+    impact: ((any) -> Vector3?)?, reaction: ((any) -> any)?, onHit: ((number, any, number) -> ())?, emit: (any) -> () }
 local MeleeService = {}
 function MeleeService.new(ports: Ports, config: SwordSwing.Config, style: string?)
     local states: { [number]: State } = {}
@@ -14,7 +14,7 @@ function MeleeService.new(ports: Ports, config: SwordSwing.Config, style: string
     local function event(swing: Swing, kind: string, position: Vector3?, reason: string?): any
         local state = states[swing.owner]
         return { kind = kind, style = style, reason = reason, owner = swing.owner, life = swing.life, swingId = swing.swingId,
-            direction = swing.direction, position = position, startedAt = swing.startedAt, hitAt = swing.hitAt,
+            requestId = swing.requestId, direction = swing.direction, position = position, startedAt = swing.startedAt, hitAt = swing.hitAt,
             expiresAt = swing.expiresAt, readyAt = if state then state.readyAt else 0 }
     end
     local function finish(owner: number, reason: string)
@@ -63,13 +63,18 @@ function MeleeService.new(ports: Ports, config: SwordSwing.Config, style: string
                         contacts += 1
                         local contact = event(swing, "contact", point, nil)
                         contact.contactId = contacts
+                        contact.contactAt, contact.sourcePosition, contact.damageApplied = now, origin, true
+                        if ports.reaction then
+                            local targetInfo = ports.reaction(target)
+                            if targetInfo then contact.targetModel, contact.targetLife = targetInfo.targetModel, targetInfo.targetLife end
+                        end
                         ports.emit(contact)
                     end
                 end
             end
         end
     end
-    function service.cast(owner: number, life: number, direction: Vector3, now: number): (boolean, string?)
+    function service.cast(owner: number, life: number, direction: Vector3, now: number, requestId: number?): (boolean, string?)
         if paused[owner] ~= nil then return false, "paused" end
         service.step(now)
         local state = states[owner]
@@ -83,6 +88,7 @@ function MeleeService.new(ports: Ports, config: SwordSwing.Config, style: string
         sequence += 1
         local accepted = state :: State
         local swing = SwordSwing.begin(accepted, owner, sequence, flat.Unit, now, config)
+        swing.requestId = requestId
         ports.emit(event(swing, "preparing", origin, nil))
         return true, nil
     end

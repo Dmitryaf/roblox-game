@@ -7,7 +7,8 @@ export type Ports = {
 	origin: (number) -> Vector3?,
 	alive: (number) -> boolean,
 	sweep: (number, Vector3, Vector3, number) -> (Vector3?, any),
-	damage: (number, any, number) -> (),
+	damage: (number, any, number) -> boolean?,
+	impact: ((any) -> any)?,
 	landing: (number, Vector3, Vector3) -> Vector3?,
 	move: (number, Vector3) -> (),
 	emit: (any) -> (),
@@ -22,13 +23,18 @@ function ArrowService.new(ports: Ports, config: Config)
 	local sequence = 0
 	local service = {}
 
-	local function finish(owner: number, reason: string, position: Vector3?)
+	local function remove(owner: number, reason: string, position: Vector3?): any
 		local state = states[owner]
 		local cast = if state then state.cast else nil
 		if not cast then return end
 		projectiles[owner] = nil
 		Arrow.cancel(state)
-		ports.emit({ kind = "ended", owner = owner, life = cast.life, castId = cast.id, reason = reason, position = position })
+		return { kind = "ended", owner = owner, life = cast.life, castId = cast.id, requestId = cast.requestId,
+			reason = reason, position = position }
+	end
+	local function finish(owner: number, reason: string, position: Vector3?)
+		local ended = remove(owner, reason, position)
+		if ended then ports.emit(ended) end
 	end
 
 	function service.join(owner: number, life: number)
@@ -83,11 +89,20 @@ function ArrowService.new(ports: Ports, config: Config)
 			if distance > 0 then
 				local delta = projectile.direction * distance
 				local hit, target = ports.sweep(owner, position, delta, config.radius)
+				local sampledAt = projectile.sampledAt
 				projectile.sampledAt = untilTime
 				if hit then
 					-- Remove before damage: death callbacks and repeats cannot apply this hit again.
-					finish(owner, "hit", hit)
-					if target then ports.damage(owner, target, config.damage) end
+					local ended = remove(owner, "hit", hit)
+					if ended then
+						ended.sourcePosition = position
+						ended.contactAt = sampledAt + math.clamp((hit - position).Magnitude / config.speed, 0, untilTime - sampledAt)
+						local damaged = if target then ports.damage(owner, target, config.damage) else nil
+						ended.damageApplied = damaged == true
+						local impact = if damaged == true and ports.impact then ports.impact(target) else nil
+						if impact then ended.targetModel, ended.targetLife = impact.targetModel, impact.targetLife end
+						ports.emit(ended)
+					end
 					continue
 				end
 				projectile.position = position + delta
@@ -96,7 +111,7 @@ function ArrowService.new(ports: Ports, config: Config)
 		end
 	end
 
-	function service.cast(owner: number, life: number, direction: Vector3, now: number): (boolean, string?)
+	function service.cast(owner: number, life: number, direction: Vector3, now: number, requestId: number?): (boolean, string?)
 		if paused[owner] ~= nil then return false, "paused" end
 		service.step(now)
 		local state = states[owner]
@@ -106,9 +121,10 @@ function ArrowService.new(ports: Ports, config: Config)
 		sequence += 1
 		local cast, reason = Arrow.begin(state, owner, life, sequence, now, config.windup, config.lifetime, config.cooldown)
 		if not cast then return false, reason end
+		cast.requestId = requestId
 		projectiles[owner] = { cast = cast, position = nil, direction = direction, sampledAt = cast.launchAt }
 		ports.emit({ kind = "preparing", owner = owner, life = life, castId = cast.id,
-			direction = direction, startedAt = now, launchAt = cast.launchAt, expiresAt = cast.expiresAt, readyAt = state.readyAt })
+			requestId = requestId, direction = direction, startedAt = now, launchAt = cast.launchAt, expiresAt = cast.expiresAt, readyAt = state.readyAt })
 		return true, nil
 	end
 
@@ -130,12 +146,33 @@ function ArrowService.new(ports: Ports, config: Config)
 		return true, nil
 	end
 
+	-- Internal server ports for the explicit hands/arrow combination. Callers must not
+	-- yield between planning and consumption, just like the ordinary teleport path.
+	function service.flying(owner: number, life: number, castId: number, now: number): (Projectile?, string?)
+		if paused[owner] ~= nil then return nil, "paused" end
+		service.step(now)
+		local state = states[owner]
+		if not state then return nil, "not_ready" end
+		local allowed, reason = Arrow.canTeleport(state, owner, life, castId, now)
+		if not allowed then return nil, reason end
+		local projectile = projectiles[owner]
+		if not projectile or not projectile.position then return nil, "stale_arrow" end
+		return projectile, nil
+	end
+	function service.consume(owner: number, projectile: Projectile, commit: (() -> ())?): boolean
+		if projectiles[owner] ~= projectile then return false end
+		local ended = remove(owner, "hands_transferred", projectile.position)
+		if commit then commit() end
+		if ended then ports.emit(ended) end
+		return true
+	end
+
 	function service.snapshot(owner: number)
 		local state = states[owner]
 		local active = {}
 		for id, projectile in projectiles do
 			local cast = projectile.cast
-			table.insert(active, { kind = cast.phase, owner = id, life = cast.life, castId = cast.id,
+			table.insert(active, { kind = cast.phase, owner = id, life = cast.life, castId = cast.id, requestId = cast.requestId,
 				position = projectile.position, direction = projectile.direction, speed = config.speed,
 				startedAt = cast.launchAt - config.windup, launchAt = cast.launchAt, expiresAt = cast.expiresAt, sampledAt = projectile.sampledAt })
 		end

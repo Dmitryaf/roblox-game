@@ -2,7 +2,7 @@
 export type Config = { distance: number, duration: number, cooldown: number }
 export type Ports = {
     alive: (number) -> boolean,
-    start: (number, Vector3, number, number) -> (Vector3?, number?, string?),
+    start: (number, Vector3, number, number, number?) -> (Vector3?, number?, string?),
     stop: (number, string) -> (), emit: (any) -> (),
 }
 type State = { life: number, alive: boolean, readyAt: number, dash: any? }
@@ -53,7 +53,7 @@ function DashService.new(ports: Ports, config: Config)
             elseif now >= state.dash.expiresAt then finish(owner, "expired") end
         end
     end
-    function service.cast(owner: number, life: number, direction: Vector3, now: number): (boolean, string?)
+    function service.cast(owner: number, life: number, direction: Vector3, now: number, requestId: number?): (boolean, string?)
         service.step(now)
         local state = states[owner]
         if not state then return false, "not_ready" end
@@ -64,12 +64,12 @@ function DashService.new(ports: Ports, config: Config)
         if now < state.readyAt then return false, "cooldown" end
         local flat = direction * Vector3.new(1, 0, 1)
         if flat.Magnitude ~= flat.Magnitude or flat.Magnitude < 0.1 or flat.Magnitude == math.huge then return false, "invalid_aim" end
-        local position, distance, reason = ports.start(owner, flat.Unit, config.distance, config.duration)
+        local position, distance, reason = ports.start(owner, flat.Unit, config.distance, config.duration, requestId)
         if not position or not distance then return false, reason or "blocked" end
         sequence += 1
         state.readyAt = now + config.cooldown
         local duration = config.duration * distance / config.distance
-        local dash = { owner = owner, life = life, dashId = sequence, direction = flat.Unit,
+        local dash = { owner = owner, life = life, dashId = sequence, requestId = requestId, direction = flat.Unit,
             position = position, distance = distance, duration = duration, speed = config.distance / config.duration,
             startedAt = now, expiresAt = now + duration, readyAt = state.readyAt }
         state.dash = dash

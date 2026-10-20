@@ -37,12 +37,16 @@ function MeleeController.start(player: Player, remote: RemoteEvent, hud: any, ef
 			request.direction = direction
 			pending = { id = requestId, life = life, at = now() }
 			note, noteUntil = "", 0
+            if effects.preview and phase == "" and now() >= readyAt then effects.preview(requestId, life, direction) end
 		else syncId, lastSync = requestId, now() end
 		remote:FireServer(request)
 	end
 	local function snapshot(state: any): boolean
 		if type(state) ~= "table" or type(state.life) ~= "number" or state.life < life then return false end
-		if state.life ~= life then pending = nil end
+		if state.life ~= life or not state.alive or state.suspended then
+            if effects.cancelPreview then effects.cancelPreview() end
+            pending = nil
+        end
 		life, alive, suspended, readyAt = state.life, state.alive == true, state.suspended == true, state.readyAt
 		if recovering then note, noteUntil = "Состояние обновлено. Повторите удар.", now() + 2.5 end
 		synced, recovering = life > 0, false
@@ -72,6 +76,7 @@ function MeleeController.start(player: Player, remote: RemoteEvent, hud: any, ef
 			if syncReply then syncId = nil end
 			if actionReply then
 				pending = nil
+				if not event.ok and effects.cancelPreview then effects.cancelPreview(event.requestId) end
 				if not event.ok and requestedLife == life and (event.life == nil or event.life == life) then
 					note, noteUntil = reasons[event.reason] or "Удар отклонён. Повторите попытку.", now() + 3
 				end
@@ -104,6 +109,7 @@ function MeleeController.start(player: Player, remote: RemoteEvent, hud: any, ef
 		effects.step(time)
 		if (not synced or recovering) and time - lastSync > 2 then send("sync", nil) end
 		if pending and time - pending.at > 2.5 then
+			if effects.cancelPreview then effects.cancelPreview(pending.id) end
 			pending, recovering = nil, true
 			note, noteUntil = "Нет подтверждения сервера. Обновляем состояние…", time + 4
 			send("sync", nil)
@@ -122,6 +128,7 @@ function MeleeController.start(player: Player, remote: RemoteEvent, hud: any, ef
 	send("sync", nil)
 	return function()
 		unbind(); connection:Disconnect(); frame:Disconnect()
+        if effects.cancelPreview then effects.cancelPreview() end
 		effects.destroy(); hud.destroy()
 	end
 end

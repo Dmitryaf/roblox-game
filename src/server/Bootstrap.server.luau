@@ -57,21 +57,25 @@ local classes = ClassService.new({
     end,
     changed = function(owner) runtime.reset(owner, nil, false) end,
 })
+local function reaction(target: Humanoid): any
+    local model = target.Parent
+    return if model and model:IsA("Model") then { targetModel = model, targetLife = model:GetAttribute("CombatLife") or 0 } else nil
+end
 local arrow = ArrowService.new({
     origin = world.origin, alive = world.alive, sweep = world.sweep,
-    damage = world.damage, landing = world.landing, move = world.move,
+    damage = world.damage, landing = world.landing, move = world.move, impact = reaction,
     emit = function(event) arrowRemote:FireAllClients(event) end,
 }, Config)
 local hands = HandsService.new({ alive = world.alive, placement = world.placement, targets = world.areaTargets,
     damage = world.damage, slow = world.slow, emit = function(event) handsRemote:FireAllClients(event) end }, HandsConfig)
 local sword = SwordWorld.new(world)
 local melee = MeleeService.new({ alive = world.alive, origin = world.origin, face = world.face,
-    targets = sword.targets, damage = world.damage, impact = sword.impact,
+    targets = sword.targets, damage = world.damage, impact = sword.impact, reaction = reaction,
     emit = function(event) meleeRemote:FireAllClients(event) end }, WarriorConfig)
 local dash = DashService.new({ alive = world.alive, start = world.startDash, stop = world.stopDash,
     emit = function(event) dashRemote:FireAllClients(event) end }, DashConfig)
 local heavy = HeavyStrikeService.new({ alive = world.alive, origin = world.origin, face = world.face,
-    targets = sword.targets, damage = world.damage, impact = sword.impact,
+    targets = sword.targets, damage = world.damage, impact = sword.impact, reaction = reaction,
     token = world.slowToken, targetOwner = world.targetOwner,
     slow = function(target, multiplier) world.slow(target, multiplier, "heavy") end,
     emit = function(event) heavyRemote:FireAllClients(event) end }, HeavyConfig)
@@ -87,7 +91,7 @@ local meleeGateway = MeleeGateway.new(meleeRemote, { cast = guarded.swing, snaps
 local dashGateway = DashGateway.new(dashRemote, { cast = guarded.dash, snapshot = guarded.dashSnapshot }, now)
 local heavyGateway = MeleeGateway.new(heavyRemote, { cast = guarded.heavyStrike, snapshot = guarded.heavySnapshot }, now)
 runtime.start(matches, arrowGateway, matchGateway, handsGateway, classGateway, meleeGateway, dashGateway, heavyGateway)
-local stopFixture = Fixture.attach(matches, world, now)
+local stopFixture = Fixture.attach(matches, world, now, combat)
 game:BindToClose(function()
     runtime.destroy()
     stopFixture()

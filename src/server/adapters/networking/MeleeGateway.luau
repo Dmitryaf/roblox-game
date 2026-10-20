@@ -24,7 +24,7 @@ function MeleeGateway.new(remote: RemoteEvent, service: any, now: () -> number)
 			limit.last = request.requestId
 			if request.action == "sync" then gateway.sync(player); return end
             if request.action ~= "cast" then return end
-            local ok, reason = service.cast(owner, request.life, request.direction.Unit, time)
+            local ok, reason = service.cast(owner, request.life, request.direction.Unit, time, request.requestId)
 			remote:FireClient(player, { kind = "reply", requestId = request.requestId, life = request.life,
 				ok = ok, reason = reason, state = service.snapshot(owner) })
 		end)

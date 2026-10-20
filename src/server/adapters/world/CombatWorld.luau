@@ -255,9 +255,9 @@ function CombatWorld.new(spawns: { CFrame }?, policy: Policy?)
 	end
 	local area = AreaWorld.new(world, policy)
 	world.placement, world.areaTargets = area.placement, area.targets
-	function world.startDash(owner: number, direction: Vector3, distance: number, duration: number): (Vector3?, number?, string?)
+	function world.startDash(owner: number, direction: Vector3, distance: number, duration: number, requestId: number?): (Vector3?, number?, string?)
 		if not world.origin(owner) then return nil, nil, "invalid_position" end
-		return dash.start(owner, direction, distance, duration)
+		return dash.start(owner, direction, distance, duration, requestId)
 	end
 	world.stopDash = dash.stop
 	return world

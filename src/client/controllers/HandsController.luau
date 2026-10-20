@@ -81,7 +81,7 @@ function HandsController.start(player: Player, remote: RemoteEvent, hud: any, ef
 			end
 			return
 		end
-		if event.kind ~= "preparing" and event.kind ~= "active" and event.kind ~= "ended" then return end
+		if event.kind ~= "preparing" and event.kind ~= "active" and event.kind ~= "transferring" and event.kind ~= "ended" then return end
 		if event.owner == player.UserId then
 			if not synced or event.life ~= life then return end
 		else

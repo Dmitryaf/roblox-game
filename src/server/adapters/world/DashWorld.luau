@@ -27,7 +27,7 @@ function DashWorld.new(body: (number) -> Body?, permitted: (number, Vector3) -> 
         -- Natural expiry still needs to admit already simulated packets in flight.
         if reason ~= "expired" then leases[owner] = nil end
     end
-    function dash.start(owner: number, direction: Vector3, distance: number, duration: number): (Vector3?, number?, string?)
+    function dash.start(owner: number, direction: Vector3, distance: number, duration: number, requestId: number?): (Vector3?, number?, string?)
         local b = body(owner)
         if not b or b.root.Anchored or b.humanoid.Health <= 0 then return nil, nil, "invalid_position" end
         if not supported(b, b.trusted.Position) or math.abs(b.root.AssemblyLinearVelocity.Y) > 8 then return nil, nil, "airborne" end
@@ -80,6 +80,8 @@ function DashWorld.new(body: (number) -> Body?, permitted: (number, Vector3) -> 
         mover:SetAttribute("DashSpeed", distance / duration)
         leases[owner] = { direction = direction, remaining = travel,
             untilAt = os.clock() + duration * travel / distance + 0.8, mover = mover, attachment = attachment }
+        mover:SetAttribute("DashRequestId", requestId)
+        mover:SetAttribute("DashLife", b.character:GetAttribute("CombatLife"))
         mover.Parent = b.root
         return start, travel, nil
     end

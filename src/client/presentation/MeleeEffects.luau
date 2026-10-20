@@ -50,7 +50,7 @@ function MeleeEffects.new(sharedPose: any?, style: string?)
 		for index = 0, 9 do
 			local angle = math.rad(-50 + index * 100 / 9)
 			local node = Instance.new("Attachment")
-			local radius = if heavy then 6.1 else 5.5
+			local radius = 7
 			node.Position, node.Parent = Vector3.new(math.sin(angle) * radius, math.sin(angle) * (if heavy then 0.9 else 0.55), -math.cos(angle) * radius), root
 			if previous then
 				local beam = Instance.new("Beam")
@@ -101,6 +101,10 @@ function MeleeEffects.new(sharedPose: any?, style: string?)
             entry.glint = glint
         end
     end
+    function effects.preview(requestId: number, life: number, direction: Vector3): boolean
+        return pose.preview(Players.LocalPlayer.UserId, kind, requestId, life, direction)
+    end
+    function effects.cancelPreview(requestId: number?) pose.cancelPreview(Players.LocalPlayer.UserId, kind, requestId) end
     local function remove(id: number, cancel: boolean)
 		local entry = swings[id]
 		if not entry then return end
@@ -138,8 +142,8 @@ function MeleeEffects.new(sharedPose: any?, style: string?)
             scheduled = scheduled, trail = nil, nodes = {}, brace = nil, glint = nil}
 		if not previous then
 			swings[id] = entry
-			if heavy then pose.beginHeavy(event.owner, event.hitAt, event.startedAt, event.expiresAt, event.direction, event.swingId)
-			else pose.begin(event.owner, event.hitAt, event.startedAt, event.expiresAt, event.direction, event.swingId) end
+			if heavy then pose.beginHeavy(event.owner, event.hitAt, event.startedAt, event.expiresAt, event.direction, event.swingId, event.requestId)
+			else pose.begin(event.owner, event.hitAt, event.startedAt, event.expiresAt, event.direction, event.swingId, event.requestId) end
 			if scheduled then
 				local root = body(event.owner)
 				if root then

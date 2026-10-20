@@ -11,31 +11,36 @@ function MatchCombat.new(combat: any, matches: any, tick: () -> (), attackReason
 	return {
 		snapshot = combat.snapshot, handsSnapshot = combat.handsSnapshot, meleeSnapshot = combat.meleeSnapshot,
         dashSnapshot = combat.dashSnapshot, heavySnapshot = combat.heavySnapshot,
-        heavyStrike = function(owner: number, life: number, direction: Vector3, now: number): (boolean, string?)
+        heavyStrike = function(owner: number, life: number, direction: Vector3, now: number, requestId: number?): (boolean, string?)
             local reason = allowed(owner, life)
             if reason then return false, reason end
-            return combat.heavyStrike(owner, life, direction, now)
+            return combat.heavyStrike(owner, life, direction, now, requestId)
         end,
-        dash = function(owner: number, life: number, direction: Vector3, now: number): (boolean, string?)
+        dash = function(owner: number, life: number, direction: Vector3, now: number, requestId: number?): (boolean, string?)
             local reason = allowed(owner, life)
             if reason then return false, reason end
-            return combat.dash(owner, life, direction, now)
+            return combat.dash(owner, life, direction, now, requestId)
         end,
-        swing = function(owner: number, life: number, direction: Vector3, now: number): (boolean, string?)
+        swing = function(owner: number, life: number, direction: Vector3, now: number, requestId: number?): (boolean, string?)
             local reason = allowed(owner, life)
             if reason then return false, reason end
-            return combat.swing(owner, life, direction, now)
+            return combat.swing(owner, life, direction, now, requestId)
         end,
         castHands = function(owner: number, life: number, position: Vector3, now: number): (boolean, string?)
             local reason = allowed(owner, life)
             if reason then return false, reason end
             return combat.castHands(owner, life, position, now)
         end,
-		cast = function(owner: number, life: number, direction: Vector3, now: number): (boolean, string?)
+		cast = function(owner: number, life: number, direction: Vector3, now: number, requestId: number?): (boolean, string?)
 			local reason = allowed(owner, life)
 			if reason then return false, reason end
-			return combat.cast(owner, life, direction, now)
+			return combat.cast(owner, life, direction, now, requestId)
 		end,
+        transferHands = function(owner: number, life: number, castId: number, now: number): (boolean, string?)
+            local reason = allowed(owner, life)
+            if reason then return false, reason end
+            return combat.transferHands(owner, life, castId, now)
+        end,
 		teleport = function(owner: number, life: number, castId: number, now: number): (boolean, string?)
 			local reason = allowed(owner, life)
 			if reason then return false, reason end
