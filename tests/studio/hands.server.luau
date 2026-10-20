@@ -13,6 +13,7 @@ local connection = control.OnServerEvent:Connect(function(player, kind, id, repo
     elseif kind == "failure" then failed = tostring(id)
     elseif kind == "report" then reports[id] = { player = player, report = report } end
 end)
+local exitDiagnostics: { RBXScriptConnection } = {}
 local function waitFor(predicate: () -> boolean, seconds: number, message: string)
     local deadline = os.clock() + seconds
     repeat
@@ -50,23 +51,99 @@ local ok, problem = xpcall(function()
     place(caster, Vector3.new(0, 3, -35)); place(target, Vector3.new(3, 3, -30))
     settled(caster, Vector3.new(0, 3, -35)); settled(target, Vector3.new(3, 3, -30))
     local center = Vector3.new(2, 0, -30)
+    local cumulativeDamage = 0
+    local lastObservedHealth = health(target).Health
+    table.insert(exitDiagnostics, health(target).HealthChanged:Connect(function(current)
+        if current < lastObservedHealth then cumulativeDamage += lastObservedHealth - current end
+        lastObservedHealth = current
+    end))
+    local damageBeforeCast = cumulativeDamage
     command(caster, "cast", { point = Vector3.new(70, 0, -30), ok = false, reason = "out_of_range" })
     assert(health(target).Health == 100 and health(target).WalkSpeed == 16, "Rejected placement affected opponent")
     local accepted = command(caster, "cast", { point = center, ok = true })
     assert(health(target).Health == 100, "Hands damaged before preparation completed")
     waitFor(function() return health(target).WalkSpeed < 16 end, 4, "Active hands did not slow real opponent")
     assert(math.abs(health(target).WalkSpeed - 10.4) < 0.001, "Incorrect real movement multiplier")
-    waitFor(function() return health(target).Health < 100 end, 3, "Hands did not deal periodic damage")
+    waitFor(function() return cumulativeDamage > damageBeforeCast end, 3, "Hands did not deal periodic damage")
+    local firstDamage = cumulativeDamage - damageBeforeCast
+    assert(firstDamage >= 3 and firstDamage <= 6, "Actual first DoT did not exercise the negative-health counter within its bounded burst")
+    print("HandsDamageCounter", "firstRealDoT", firstDamage, "health", health(target).Health)
     assert(health(target).Health >= 94, "Hands dealt an unbounded first damage burst")
     assert(health(caster).Health == 100 and health(caster).WalkSpeed == 16, "Hands affected their caster")
     local visible = command(target, "inspect")
     assert(visible.observed and visible.count == 278 and visible.hud, "Observer missed full hands presentation/HUD")
     assert(visible.palms == 12 and visible.spirals == 15 and visible.veils == 6, "Observer missed smaller hands and green vortex veil")
+    -- Default health regeneration produced a confirmed 97 -> 98 false failure
+    -- here. Count real negative deltas instead, while proving both positions
+    -- remain outside throughout the original 0.65-second observation window.
+    local exitBody = (target.Character :: Model):FindFirstChild("HumanoidRootPart") :: BasePart
+    local exitHuman = health(target)
+    local exitAt, exitLines, motionLines = os.clock(), 0, 0
+    local area = accepted.state.active[1]
+    local observingExit, stayedOutside, outsideSamples = false, true, 0
+    local minimumActual, minimumTrusted = math.huge, math.huge
+    local function sampleOutside()
+        outsideSamples += 1
+        local trusted = bridge:Invoke("position", target.UserId)
+        local actualDistance = ((exitBody.Position - area.position) * Vector3.new(1, 0, 1)).Magnitude
+        local trustedDistance = if trusted then ((trusted - area.position) * Vector3.new(1, 0, 1)).Magnitude else 0
+        minimumActual, minimumTrusted = math.min(minimumActual, actualDistance), math.min(minimumTrusted, trustedDistance)
+        if actualDistance <= area.radius or trustedDistance <= area.radius then stayedOutside = false end
+    end
+    local previousPosition, previousHealth, previousSpeed = exitBody.Position, exitHuman.Health, exitHuman.WalkSpeed
+    local function exitLog(label: string, sampled: boolean?, deltaHealth: number?)
+        -- Keep health deltas visible even when physics produces many root samples.
+        if sampled and label == "heartbeatChange" then
+            if motionLines >= 10 then return end
+            motionLines += 1
+        end
+        if exitLines >= 20 then return end
+        exitLines += 1
+        print("HandsExit", label, "dt", os.clock() - exitAt, "serverTime", workspace:GetServerTimeNow(),
+            "actual", exitBody.Position, "trusted", bridge:Invoke("position", target.UserId),
+            "health", exitHuman.Health, "delta", deltaHealth or 0, "speed", exitHuman.WalkSpeed,
+            "velocity", exitBody.AssemblyLinearVelocity, "corrections", (target.Character :: Model):GetAttribute("CombatMovementCorrections") or 0,
+            "launchAt", area.launchAt, "expiresAt", area.expiresAt)
+    end
+    table.insert(exitDiagnostics, exitHuman.HealthChanged:Connect(function(current)
+        if os.clock() - exitAt > 0.8 then return end
+        local delta = current - previousHealth
+        previousHealth = current
+        exitLog("healthChanged", true, delta)
+    end))
+    table.insert(exitDiagnostics, game:GetService("RunService").Heartbeat:Connect(function()
+        if observingExit then sampleOutside() end
+        if os.clock() - exitAt > 0.8 then return end
+        local position, speed = exitBody.Position, exitHuman.WalkSpeed
+        if (position - previousPosition).Magnitude >= 0.05 or speed ~= previousSpeed then
+            exitLog("heartbeatChange", true)
+            previousPosition, previousSpeed = position, speed
+        end
+    end))
+    exitLog("beforeMove")
     place(target, Vector3.new(23, 3, -30))
+    exitLog("afterImmediateMove")
     waitFor(function() return health(target).WalkSpeed == 16 end, 2, "Leaving hands did not restore speed")
+    exitLog("speedRestored")
     local afterExit = health(target).Health
+    local damageAfterExit = cumulativeDamage
+    observingExit = true
+    sampleOutside()
+    exitLog("healthCaptured")
     task.wait(0.65)
-    assert(health(target).Health == afterExit, "Area damaged a target that left")
+    sampleOutside()
+    observingExit = false
+    exitLog("afterOriginalWait")
+    local trustedAfterExit = bridge:Invoke("position", target.UserId)
+    print("HandsExitGuarantee", "damageBefore", damageAfterExit, "damageAfter", cumulativeDamage,
+        "outsideSamples", outsideSamples, "actualMinimum", minimumActual, "trustedMinimum", minimumTrusted,
+        "actualFinal", exitBody.Position, "trustedFinal", trustedAfterExit)
+    assert(cumulativeDamage == damageAfterExit, "Area damaged a target that left")
+    assert(stayedOutside and outsideSamples >= 3 and trustedAfterExit ~= nil
+        and (exitBody.Position - Vector3.new(23, 3, -30)).Magnitude < 1
+        and (trustedAfterExit - Vector3.new(23, 3, -30)).Magnitude < 1,
+        "Exit observation did not keep both actual and trusted target positions outside the hands")
+    assert(health(target).Health >= afterExit, "Target lost health after leaving hands")
     waitFor(function() return workspace:GetServerTimeNow() >= accepted.state.active[1].expiresAt + 0.25 end, 6, "Hands did not expire")
     local cleared = command(target, "inspect")
     assert(cleared.children == 0 and health(target).WalkSpeed == 16, "Expired hands leaked visuals or slow")
@@ -99,4 +176,5 @@ local ok, problem = xpcall(function()
     print("PASS hands: real Q/world aim, range rejection without cooldown, warning, opponent slow/DoT, self immunity, exit/expiry restore, observer/query isolation, death/new life, pad protection and pause cleanup")
 end, debug.traceback)
 connection:Disconnect()
+for _, diagnostic in exitDiagnostics do diagnostic:Disconnect() end
 game:GetService("StudioTestService"):EndTest({ ok = ok, error = if ok then nil else tostring(problem) })
