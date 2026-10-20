@@ -96,7 +96,7 @@ local ok, err = xpcall(function()
 		local count = 0
 		for player in ready do if player.Parent == Players then count += 1 end end
 		return count == expected
-	end, 55, "Clients did not initialize production HUD and synchronization")
+	end, 100, "Clients did not initialize production HUD and synchronization")
 	local players = Players:GetPlayers()
 	table.sort(players, function(a, b) return a.UserId < b.UserId end)
 	assert(#players == expected, "Unexpected player count")

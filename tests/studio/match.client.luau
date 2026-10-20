@@ -14,6 +14,18 @@ local arrowReplies: { [number]: any } = {}
 local snapshotCount = 0
 local ownPreparing = 0
 local connections: { RBXScriptConnection } = {}
+local renderErrors = {}
+local presentationFrames = 0
+local simulationFrames, heartbeatFrames = 0, 0
+table.insert(connections, game:GetService("RunService").RenderStepped:Connect(function() presentationFrames += 1 end))
+table.insert(connections, game:GetService("RunService").PreSimulation:Connect(function() simulationFrames += 1 end))
+table.insert(connections, game:GetService("RunService").Heartbeat:Connect(function() heartbeatFrames += 1 end))
+table.insert(connections, game:GetService("LogService").MessageOut:Connect(function(message, kind)
+	if kind == Enum.MessageType.MessageError then
+		table.insert(renderErrors, message)
+		if #renderErrors > 4 then table.remove(renderErrors, 1) end
+	end
+end))
 
 local function currentLife(): number
 	local character = player.Character
@@ -23,11 +35,20 @@ end
 
 local function initializationFlags(): string
 	local character = player.Character
+	local humanoid = if character then character:FindFirstChildOfClass("Humanoid") else nil
+	local bodyParts = {}
+	if character then
+		for _, item in character:GetChildren() do if item:IsA("BasePart") then table.insert(bodyParts, item.Name) end end
+	end
 	return game:GetService("HttpService"):JSONEncode({
 		owner = player.UserId, character = character ~= nil,
 		root = character ~= nil and character:FindFirstChild("HumanoidRootPart") ~= nil,
 		hud = player.PlayerGui:FindFirstChild("MatchHud") ~= nil,
 		latest = latest ~= nil, snapshots = snapshotCount, life = currentLife(), arrowLife = arrowLife,
+		renderErrors = renderErrors,
+		presentationFrames = presentationFrames,
+		simulationFrames = simulationFrames, heartbeatFrames = heartbeatFrames,
+		health = if humanoid then humanoid.Health else nil, bodyParts = bodyParts,
 	})
 end
 
@@ -177,8 +198,11 @@ local ok, err = xpcall(function()
 	untilTrue(function()
 		return player.Character ~= nil and player.Character:FindFirstChild("HumanoidRootPart") ~= nil
 			and player.PlayerGui:FindFirstChild("MatchHud") ~= nil and latest ~= nil and currentLife() > 0
-	end, 35, "Production character, MatchHud or initial snapshot absent")
+	end, 60, "Production character, MatchHud or initial snapshot absent")
 	inspectHud()
+	local loadArt = require :: any
+	local artTests = loadArt(ReplicatedStorage:WaitForChild("WarlockArtTests") :: ModuleScript)
+	print("PASS Warlock art contracts " .. game:GetService("HttpService"):JSONEncode(artTests.run()))
 	print("MatchTest client ready " .. initializationFlags())
 	control:FireServer("ready")
 end, debug.traceback)

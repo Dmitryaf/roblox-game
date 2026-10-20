@@ -28,6 +28,7 @@ if not match:
     }
     project["tree"]["ServerScriptService"]["Game"]["$className"] = "Folder"
 if match:
+    project["tree"]["ReplicatedStorage"]["WarlockArtTests"] = {"$path": str(ROOT / "tests/studio/warlock_art.luau")}
     project["tree"]["ServerStorage"]["$attributes"] = {"MatchTest": True}
     project["tree"]["ReplicatedStorage"]["MatchTestControl"] = {"$className": "RemoteEvent"}
     project["tree"]["ServerScriptService"]["MatchTest"] = {"$path": str(ROOT / "tests/studio/match.server.luau")}
@@ -50,7 +51,9 @@ runtime_test = multiplayer or match
 test_expression = f'game:GetService("StudioTestService"):ExecuteMultiplayerTestAsync({clients}, {{ lagMs = {lag_ms}, clients = {clients} }})' if runtime_test else '(function() assert(require(game:GetService("ServerStorage"):WaitForChild("StudioWorldTests", 10))); return require(game:GetService("ServerStorage"):WaitForChild("MatchWorldTests", 10)) end)()'
 plugin = f'''--!strict
 task.defer(function()
-    if game:GetService("RunService"):IsRunning() then return end
+    -- A freshly created test server/client can load plugins before simulation starts.
+    -- IsRunning alone does not distinguish that runtime DataModel from the editor.
+    if not game:GetService("StudioTestService").EditModeActive then return end
     local token = game:GetService("ReplicatedStorage"):FindFirstChild("StudioTestToken")
     if not token or not token:IsA("StringValue") or token.Value ~= "{token}" then return end
     print("{token} START")

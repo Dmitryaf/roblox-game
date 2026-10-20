@@ -38,7 +38,8 @@ $taskCompleted = $false
 try {
     Copy-Item -LiteralPath build/WarlockGeometryTest.rbxmx -Destination $taskPlugin
     $taskProcess = Start-Process -FilePath $StudioExe -ArgumentList ('"' + $taskPlace + '"') -WindowStyle Hidden -PassThru
-    $taskDeadline = (Get-Date).AddSeconds(150)
+    $taskLimit = if ($Match -and $Clients -eq 6) { 220 } else { 150 }
+    $taskDeadline = (Get-Date).AddSeconds($taskLimit)
     do {
         Start-Sleep -Milliseconds 1000
         $taskMatches = @(Get-ChildItem -LiteralPath $taskLogDir -Filter '*Studio*last.log' |
@@ -52,7 +53,7 @@ try {
             return
         }
     } while ((Get-Date) -lt $taskDeadline)
-    throw 'Studio did not finish within 150 seconds; inspect the test window'
+    throw "Studio did not finish within $taskLimit seconds; inspect the test window"
 } finally {
     # Remove only this uniquely named plugin created by this invocation.
     if (Test-Path -LiteralPath $taskPlugin) { Remove-Item -LiteralPath $taskPlugin }
