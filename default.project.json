@@ -9,7 +9,21 @@
       "StarterPlayerScripts": {"Game": {"$path": "src/client"}}
     },
     "Workspace": {"$properties": {"Gravity": 196.2, "StreamingEnabled": false}},
-    "Lighting": {"$properties": {"ClockTime": 17, "Brightness": 2, "Ambient": [0.25, 0.22, 0.32]}},
+    "Lighting": {
+      "$properties": {
+        "Technology": "Future", "ClockTime": 16.4, "Brightness": 2.4, "Ambient": [0.20, 0.22, 0.26],
+        "OutdoorAmbient": [0.36, 0.40, 0.43], "GlobalShadows": true,
+        "EnvironmentDiffuseScale": 0.45, "EnvironmentSpecularScale": 0.35,
+        "ShadowSoftness": 0.35, "ExposureCompensation": -0.1
+      },
+      "SanctuaryAir": {"$className": "Atmosphere", "$properties": {
+        "Density": 0.24, "Offset": 0.05, "Color": [0.74, 0.79, 0.75],
+        "Decay": [0.37, 0.32, 0.43], "Glare": 0.1, "Haze": 1.4
+      }},
+      "MagicBloom": {"$className": "BloomEffect", "$properties": {"Intensity": 0.14, "Size": 32, "Threshold": 1.6}},
+      "StoneGrade": {"$className": "ColorCorrectionEffect", "$properties": {"Contrast": 0.08, "Saturation": -0.08, "TintColor": [1, 0.98, 0.94]}},
+      "EveningRays": {"$className": "SunRaysEffect", "$properties": {"Intensity": 0.025, "Spread": 0.8}}
+    },
     "SoundService": {"$properties": {"RespectFilteringEnabled": true}}
   }
 }

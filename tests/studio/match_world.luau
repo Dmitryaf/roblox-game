@@ -23,6 +23,32 @@ end
 local count = 0
 local function test(name: string, run: () -> ()) run(); count += 1; print("PASS Match geometry: " .. name) end
 local ok, err = xpcall(function()
+	test("four physical covers stay outside the objective and stop projectiles", function()
+		local covers = 0
+		for _, item in arena.folder:GetChildren() do
+			if item:IsA("BasePart") and item:GetAttribute("MainCover") then
+				covers += 1
+				assert(item.CanCollide and item.CanQuery, "Cover has no physical body")
+				assert(math.abs(item.Position.X) - item.Size.X / 2 > 18
+					and math.abs(item.Position.Z) - item.Size.Z / 2 > 18, "Safe cover overlaps the capture zone")
+			end
+		end
+		assert(covers == 4, "Arena must have four main covers")
+		local hit = world.sweep(101, Vector3.new(44, 4, 20), Vector3.new(0, 0, 70), 0.8)
+		assert(hit and hit.Z > 43 and hit.Z < 46, "The visible main cover does not stop the arrow")
+	end)
+	test("sanctuary decoration stays outside physics and hit queries", function()
+		for _, name in {"TrainingSanctum", "SanctuaryStonework"} do
+			local decor = arena.folder:FindFirstChild(name)
+			assert(decor, "Sanctuary art is absent")
+			for _, item in decor:GetDescendants() do
+				if item:IsA("BasePart") then
+					assert(not item.CanCollide and not item.CanQuery and not item.CanTouch,
+						"Decorative geometry participates in combat: " .. item:GetFullName())
+				end
+			end
+		end
+	end)
 	test("training visitors receive distinct stable positions", function()
 		local positions: { Vector3 } = {}
 		for owner = 201, 250 do

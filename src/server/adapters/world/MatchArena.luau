@@ -1,5 +1,8 @@
 --!strict
--- Disposable geometry for the first match. Coordinates are shared with its world adapter.
+-- Physical bounds and spawn contracts remain explicit; original sanctuary art is separately owned.
+local Stonework = require(script.Parent.ShrineStonework)
+local Courtyard = require(script.Parent.ShrineCourtyard)
+local Sanctum = require(script.Parent.TrainingSanctum)
 local MatchArena = {}
 function MatchArena.create()
 	local folder = Instance.new("Folder")
@@ -12,21 +15,21 @@ function MatchArena.create()
 		p.Parent = folder
 		return p
 	end
-	local stone = Color3.fromRGB(57, 53, 68)
+	local stone = Stonework.colors.stone
 	part("ArenaFloor", Vector3.new(192, 2, 288), Vector3.new(0, -1, 0), stone)
 	for _, x in { -97, 97 } do part("ArenaWall", Vector3.new(2, 40, 292), Vector3.new(x, 19, 0), stone) end
 	for _, z in { -145, 145 } do part("ArenaWall", Vector3.new(192, 40, 2), Vector3.new(0, 19, z), stone) end
 	-- Offset screens interrupt direct fire from the objective toward either spawn.
 	for _, sign in { -1, 1 } do
 		part("SpawnScreen", Vector3.new(42, 12, 4), Vector3.new(0, 6, sign * 80), stone)
-		part("ApproachCover", Vector3.new(4, 8, 24), Vector3.new(sign * 40, 4, sign * 40), stone)
 	end
 	local zone = part("ControlZone", Vector3.new(36, 0.12, 36), Vector3.new(0, 0.06, 0), Color3.fromRGB(159, 139, 186))
-	zone.CanCollide, zone.CanQuery = false, false
-	zone.Material, zone.Transparency = Enum.Material.Neon, 0.55
+	zone.CanCollide, zone.CanQuery, zone.CanTouch = false, false, false
+	zone.Material, zone.Transparency = Enum.Material.Neon, 0.9
 	local function label(p: BasePart, text: string)
 		local gui = Instance.new("BillboardGui")
 		gui.Size, gui.StudsOffset, gui.AlwaysOnTop = UDim2.fromOffset(240, 50), Vector3.new(0, 5, 0), true
+		gui.AlwaysOnTop, gui.MaxDistance = false, 110
 		local t = Instance.new("TextLabel")
 		t.Size, t.BackgroundTransparency, t.Text = UDim2.fromScale(1, 1), 1, text
 		t.Font, t.TextSize, t.TextColor3 = Enum.Font.GothamBold, 18, Color3.new(1, 1, 1)
@@ -37,7 +40,7 @@ function MatchArena.create()
 		local z = if team == 1 then 118 else -118
 		local pad = part("Team" .. tostring(team) .. "Pad", Vector3.new(40, 0.1, 28), Vector3.new(0, 0.05, z),
 			if team == 1 then Color3.fromRGB(57, 143, 196) else Color3.fromRGB(215, 133, 64))
-		pad.CanCollide, pad.CanQuery, pad.Transparency = false, false, 0.3
+		pad.CanCollide, pad.CanQuery, pad.CanTouch, pad.Transparency = false, false, false, 0.6
 		label(pad, if team == 1 then "A · СТАРТОВАЯ ПЛОЩАДКА" else "B · СТАРТОВАЯ ПЛОЩАДКА")
 	end
 	part("TrainingFloor", Vector3.new(72, 2, 144), Vector3.new(230, -1, 0), stone)
@@ -46,15 +49,17 @@ function MatchArena.create()
 	local target = Instance.new("Model")
 	target.Name = "Мишень"
 	target:SetAttribute("TrainingTarget", true)
-	local root = part("HumanoidRootPart", Vector3.new(3, 5, 2), Vector3.new(230, 2.5, -38), Color3.fromRGB(160, 90, 100))
+	local root = part("HumanoidRootPart", Vector3.new(3, 5, 2), Vector3.new(230, 2.5, -38), Stonework.colors.shadow)
 	root.Parent = target
-	local head = part("Head", Vector3.new(2, 2, 2), Vector3.new(230, 6, -38), Color3.fromRGB(205, 155, 115))
+	local head = part("Head", Vector3.new(2, 2, 2), Vector3.new(230, 6, -38), Stonework.colors.edge)
 	head.Parent = target
 	local health = Instance.new("Humanoid")
 	health.RequiresNeck, health.BreakJointsOnDeath = false, false
 	health.Parent, target.PrimaryPart = target, root
 	target.Parent = folder
 	label(root, "ТРЕНИРОВКА · МИШЕНЬ")
+	Courtyard.create(folder)
+	Sanctum.create(folder)
 	folder.Parent = workspace
 	local arena = { folder = folder }
 	local slots: { [number]: { team: number, index: number } } = {}
