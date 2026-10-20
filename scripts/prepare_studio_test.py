@@ -14,8 +14,12 @@ dash = "--dash" in sys.argv
 contact = "--contact" in sys.argv
 heavy = "--heavy" in sys.argv
 mixed = "--mixed" in sys.argv
+overlap = "--overlap" in sys.argv
 clients = int(sys.argv[sys.argv.index("--clients") + 1]) if "--clients" in sys.argv else 2
-assert clients in (2, 6)
+assert clients in (2, 4, 6)
+assert not (mixed and overlap), "Choose either mixed duel or four-player overlap"
+assert not overlap or clients == 4, "Overlap fixture requires four real clients"
+assert clients != 4 or overlap, "Four-client runner currently supports only overlap"
 assert not (warrior or dash or contact or heavy or mixed) or clients == 2, "Warrior/dash/contact/heavy/mixed fixtures require two clients"
 lag_ms = int(sys.argv[sys.argv.index("--lag-ms") + 1]) if "--lag-ms" in sys.argv else 0
 project = json.loads((ROOT / "default.project.json").read_text())
@@ -27,7 +31,7 @@ project["tree"]["ServerStorage"]["MatchWorldTests"] = {"$path": str(ROOT / "test
 project["tree"]["ServerStorage"]["DashWorldTests"] = {"$path": str(ROOT / "tests/studio/dash_world.luau")}
 project["tree"]["ServerStorage"]["MovementContactWorldTests"] = {"$path": str(ROOT / "tests/studio/movement_contact_world.luau")}
 project["tree"]["ServerStorage"]["SlowWorldTests"] = {"$path": str(ROOT / "tests/studio/slow_world.luau")}
-if not (match or hands or warrior or dash or contact or heavy or mixed):
+if not (match or hands or warrior or dash or contact or heavy or mixed or overlap):
     # Preserve the original arrow fixture and expectations as the main place grows.
     project["tree"]["ServerScriptService"]["Game"] = {
         name: {"$path": str(ROOT / "src/server" / name)}
@@ -79,12 +83,12 @@ if heavy:
     project["tree"]["ReplicatedStorage"]["HeavyTestDriver"] = {"$path": str(ROOT / "tests/studio/client/HeavyDriver.luau")}
     project["tree"]["ServerScriptService"]["HeavyTest"] = {"$path": str(ROOT / "tests/studio/heavy.server.luau")}
     project["tree"]["StarterPlayer"]["StarterPlayerScripts"]["HeavyTest"] = {"$path": str(ROOT / "tests/studio/heavy.client.luau")}
-if mixed:
-    project["tree"]["ServerStorage"]["$attributes"] = {"MatchTest": True, "MixedTest": True}
+if mixed or overlap:
+    project["tree"]["ServerStorage"]["$attributes"] = {"MatchTest": True, "MixedTest": mixed, "OverlapTest": overlap}
     project["tree"]["ReplicatedStorage"]["MixedTestControl"] = {"$className": "RemoteEvent"}
     project["tree"]["ReplicatedStorage"]["MixedClassDriver"] = {"$path": str(ROOT / "tests/studio/client/DashDriver.luau")}
     project["tree"]["ReplicatedStorage"]["MixedTestDriver"] = {"$path": str(ROOT / "tests/studio/client/MixedDriver.luau")}
-    project["tree"]["ServerScriptService"]["MixedTest"] = {"$path": str(ROOT / "tests/studio/mixed.server.luau")}
+    project["tree"]["ServerScriptService"]["MixedTest"] = {"$path": str(ROOT / "tests/studio/overlap.server.luau" if overlap else "tests/studio/mixed.server.luau")}
     project["tree"]["StarterPlayer"]["StarterPlayerScripts"]["MixedTest"] = {"$path": str(ROOT / "tests/studio/mixed.client.luau")}
 # This project lives in build/, so resolve source paths before writing it.
 def absolute_paths(value):
@@ -96,7 +100,7 @@ def absolute_paths(value):
                 absolute_paths(item)
 absolute_paths(project)
 (ROOT / "build/studio-test.project.json").write_text(json.dumps(project), encoding="utf-8")
-runtime_test = multiplayer or match or hands or warrior or dash or contact or heavy or mixed
+runtime_test = multiplayer or match or hands or warrior or dash or contact or heavy or mixed or overlap
 test_expression = f'game:GetService("StudioTestService"):ExecuteMultiplayerTestAsync({clients}, {{ lagMs = {lag_ms}, clients = {clients} }})' if runtime_test else '(function() assert(require(game:GetService("ServerStorage"):WaitForChild("StudioWorldTests", 10))); assert(require(game:GetService("ServerStorage"):WaitForChild("MatchWorldTests", 10))); assert(require(game:GetService("ServerStorage"):WaitForChild("DashWorldTests", 10))); assert(require(game:GetService("ServerStorage"):WaitForChild("MovementContactWorldTests", 10)).run()); assert(require(game:GetService("ServerStorage"):WaitForChild("SlowWorldTests", 10))); return true end)()'
 plugin = f'''--!strict
 task.defer(function()

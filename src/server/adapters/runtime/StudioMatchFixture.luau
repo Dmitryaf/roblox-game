@@ -10,6 +10,9 @@ local function enabled(): boolean
 	return RunService:IsStudio() and token ~= nil and token:IsA("StringValue") and ServerStorage:GetAttribute("MatchTest") == true
 end
 function StudioMatchFixture.config(default: any): any
+    if enabled() and ServerStorage:GetAttribute("OverlapTest") == true then
+        return { gathering = 2.5, countdown = 0.3, pause = 3, duration = 180, target = 150, noExpansionLast = 5 }
+    end
     if enabled() and (ServerStorage:GetAttribute("HandsTest") == true or ServerStorage:GetAttribute("WarriorTest") == true or ServerStorage:GetAttribute("DashTest") == true or ServerStorage:GetAttribute("ContactTest") == true or ServerStorage:GetAttribute("HeavyTest") == true or ServerStorage:GetAttribute("MixedTest") == true) then
         return { gathering = 0.3, countdown = 0.3, pause = 3, duration = 120, target = 150, noExpansionLast = 5 }
     end
