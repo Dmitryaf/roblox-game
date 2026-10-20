@@ -5,7 +5,7 @@ local Debris = game:GetService("Debris")
 local Pose = require(script.Parent.MeleePose)
 local MeleeEffects = {}
 local SILVER, RED = Color3.fromRGB(218, 228, 231), Color3.fromRGB(157, 49, 47)
-type Swing = { event: any, root: BasePart?, beams: { Beam }, struck: boolean }
+type Swing = { event: any, root: BasePart?, beams: { Beam }, struck: boolean, played: boolean, scheduled: boolean, trail: Trail?, nodes: { Attachment } }
 
 function MeleeEffects.new()
 	local folder = Instance.new("Folder")
@@ -61,16 +61,35 @@ function MeleeEffects.new()
 			sound:Play()
 		end
 		local flash = Instance.new("Part")
-		flash.Name, flash.Size, flash.CFrame = "SwordContactGlint", Vector3.new(0.12, 0.12, 1.25), frame * CFrame.new(0, 0, -5)
+		flash.Name, flash.Size, flash.CFrame = "SwordEdgeGlint", Vector3.new(0.12, 0.12, 1.25), frame * CFrame.new(0, 0, -5)
 		flash.Anchored, flash.CanCollide, flash.CanQuery, flash.CanTouch, flash.CastShadow = true, false, false, false, false
 		flash.Material, flash.Color, flash.Parent = Enum.Material.Neon, SILVER, root
 		Debris:AddItem(flash, 0.12)
 	end
-	local function remove(id: number, cancel: boolean)
+	local function attachTrail(entry: Swing)
+        local player = Players:GetPlayerByUserId(entry.event.owner)
+        local character = if player then player.Character else nil
+        local armour = if character then character:FindFirstChild("WarriorArmour") else nil
+        local blade = if armour then armour:FindFirstChild("WarriorSwordBlade") else nil
+        if not blade or not blade:IsA("BasePart") then return end
+        local low, high = Instance.new("Attachment"), Instance.new("Attachment")
+        low.Name, low.Position, low.Parent = "SwordTrailHeel", Vector3.new(0, -1.25, 0), blade
+        high.Name, high.Position, high.Parent = "SwordTrailTip", Vector3.new(0, 1.45, 0), blade
+        local trail = Instance.new("Trail")
+        trail.Name, trail.Attachment0, trail.Attachment1 = "MovingSwordEdge", low, high
+        trail.Color, trail.Lifetime, trail.MinLength = ColorSequence.new(SILVER, RED), 0.13, 0.03
+        trail.Transparency = NumberSequence.new(0.3, 1)
+        trail.WidthScale = NumberSequence.new(0.65, 0)
+        trail.LightEmission, trail.FaceCamera, trail.Enabled, trail.Parent = 0.35, true, false, blade
+        entry.trail, entry.nodes = trail, {low, high}
+    end
+    local function remove(id: number, cancel: boolean)
 		local entry = swings[id]
 		if not entry then return end
 		if cancel then pose.stop(entry.event.owner) end
 		if entry.root then entry.root:Destroy() end
+        if entry.trail then entry.trail:Destroy() end
+        for _, node in entry.nodes do node:Destroy() end
 		retired[id] = entry.event.expiresAt
 		swings[id] = nil
 	end
@@ -86,17 +105,22 @@ function MeleeEffects.new()
 		local now = workspace:GetServerTimeNow()
 		if now >= event.expiresAt or retired[id] then return end
 		local previous = swings[id]
+		local scheduled = event.kind == "preparing" and not quiet
 		if previous and previous.struck and event.kind == "preparing" then return end
-		local entry: Swing = previous or {event = event, root = nil, beams = {}, struck = false}
+		local entry: Swing = previous or {event = event, root = nil, beams = {}, struck = false, played = false,
+            scheduled = scheduled, trail = nil, nodes = {}}
 		if not previous then
 			swings[id] = entry
-			pose.begin(event.owner, event.hitAt, event.startedAt, event.expiresAt)
+			pose.begin(event.owner, event.hitAt, event.startedAt, event.expiresAt, event.direction)
 		end
 		entry.event = event
 		if event.kind == "struck" and not entry.struck then
 			entry.struck = true
 			-- A restored snapshot can recover the body pose, but never replays an old strike burst.
-			if not quiet then strike(entry, false) end
+			if not quiet and not entry.played then
+                entry.played = true
+                if now - event.hitAt < 0.25 then strike(entry, false) end
+            end
 		end
 	end
 	function effects.sync(events: { any })
@@ -113,6 +137,12 @@ function MeleeEffects.new()
 		for id, entry in swings do
 			if now >= entry.event.expiresAt then remove(id, false); continue end
 			local age = now - entry.event.hitAt
+            if not entry.played and entry.scheduled and age >= 0 then
+                entry.played = true
+                if age < 0.16 then strike(entry, false) end
+            end
+            if not entry.trail and age <= 0.1 then attachTrail(entry) end
+            if entry.trail then entry.trail.Enabled = age >= -0.08 and age <= 0.1 end
 			if entry.root then
 				if age >= 0.25 then entry.root:Destroy(); entry.root = nil; table.clear(entry.beams)
 				else
@@ -127,6 +157,13 @@ function MeleeEffects.new()
 	end
 	local heartbeat = RunService.Heartbeat:Connect(function()
 		local now = workspace:GetServerTimeNow()
+		-- Stroke emission follows simulation time even when an inactive viewport renders slowly.
+		for _, entry in swings do
+			if entry.trail then
+				local age = now - entry.event.hitAt
+				entry.trail.Enabled = age >= -0.08 and age <= 0.1
+			end
+		end
 		if now - lastStep >= 0.1 then effects.step(now) end
 	end)
 	function effects.destroy()
