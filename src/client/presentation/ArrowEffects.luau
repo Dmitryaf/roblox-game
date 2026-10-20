@@ -44,6 +44,11 @@ function ArrowEffects.new()
 		local entry = active[id]
 		if entry then entry.visual.destroy(); active[id] = nil end
 	end
+    function effects.prepare(owner: number, launchAt: number, direction: Vector3?, startedAt: number?)
+        pose.begin(owner, launchAt, direction, startedAt)
+        appearance.cast(owner, launchAt, startedAt)
+    end
+    function effects.stopCast(owner: number) stop(owner) end
 	function effects.event(event: any, quiet: boolean?)
 		local id = event.castId
 		if event.kind == "ended" then
@@ -63,8 +68,7 @@ function ArrowEffects.new()
 		active[id] = {visual = visual, event = event, flying = flying}
 		visual.step(workspace:GetServerTimeNow())
 		if not flying then
-			pose.begin(event.owner, event.launchAt, event.direction, event.startedAt)
-			appearance.cast(event.owner, event.launchAt, event.startedAt)
+			effects.prepare(event.owner, event.launchAt, event.direction, event.startedAt)
 		end
 		if not quiet then
 			local position = event.position
