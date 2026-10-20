@@ -84,7 +84,7 @@ test("timeout and resync keep old replies from confirming a new attack", functio
 	f.reply(sync, state(50)); f.frame(); f.attack(direction)
 	local retry = f.sent[#f.sent]; assert(retry.requestId > sync.requestId)
 	f.reply(old, state(50)); f.frame(); assert(string.find(f.status, "подтверждения"))
-	f.reply(retry, state(50), false, "busy"); f.frame(); assert(string.find(f.note, "текущий взмах"))
+	f.reply(retry, state(50), false, "busy"); f.frame(); assert(string.find(f.note, "текущее действие"))
 	f.stop()
 end)
 test("new life and class switch reject old replies while retaining foreign effects", function()

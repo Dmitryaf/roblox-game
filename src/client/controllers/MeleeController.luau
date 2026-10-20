@@ -6,7 +6,7 @@ local reasons: { [string]: string } = {
 	dead = "Персонаж погиб. Дождитесь возрождения.",
 	stale_life = "Персонаж изменился. Повторите удар.",
 	not_ready = "Ожидаем персонажа…",
-	busy = "Завершите текущий взмах.",
+	busy = "Завершите текущее действие.",
 	cooldown = "Меч ещё восстанавливается.",
 	paused = "Бой приостановлен. Дождитесь начала или возобновления.",
 	spawn_protected = "Покиньте стартовую площадку, чтобы атаковать.",
@@ -114,7 +114,7 @@ function MeleeController.start(player: Player, remote: RemoteEvent, hud: any, ef
 			else if pending then "Ожидаем подтверждения…" else if phase == "preparing" then "Подготовка взмаха…"
 			else if phase == "struck" then "Возвращаем меч в стойку…"
 			else if readyAt > time then string.format("Восстановление · %.1f с", readyAt - time) else "ЛКМ — взмах мечом в направлении курсора"
-		hud.show(status, if time < noteUntil then note else "WASD — движение · Мышь — направление удара")
+		hud.show(status, if time < noteUntil then note else "WASD — движение · Мышь — удар · E — рывок")
 	end)
 	hud.show("Подключаемся…", "Получаем состояние сервера…")
 	send("sync", nil)
