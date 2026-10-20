@@ -1,9 +1,11 @@
 --!strict
 local ClassHud = {}
+local StarterGui = game:GetService("StarterGui")
 local names: { [string]: string } = { warlock = "Чернокнижник", warrior = "Воин" }
 function ClassHud.new(playerGui: PlayerGui)
 	local gui = Instance.new("ScreenGui")
 	gui.Name, gui.ResetOnSpawn, gui.DisplayOrder = "ClassHud", false, 6
+	gui.Enabled = false
 	local panel = Instance.new("Frame")
 	panel.Name, panel.AnchorPoint = "ClassPanel", Vector2.new(1, 1)
 	panel.Position, panel.Size = UDim2.new(1, -12, 1, -104), UDim2.fromOffset(220, 202)
@@ -41,15 +43,55 @@ function ClassHud.new(playerGui: PlayerGui)
 			if enabled[classId] and callback then callback(classId) end
 		end))
 	end
+	local playerListBefore: boolean? = nil
+	local function playerList(hidden: boolean)
+		if hidden and playerListBefore == nil then
+			local read, previous = pcall(function() return StarterGui:GetCoreGuiEnabled(Enum.CoreGuiType.PlayerList) end)
+			if not read then return end
+			local changed = pcall(function() StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.PlayerList, false) end)
+			if changed then playerListBefore = previous end
+		elseif not hidden and playerListBefore ~= nil then
+			local previous = playerListBefore
+			local restored = pcall(function() StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.PlayerList, previous :: boolean) end)
+			if restored then playerListBefore = nil end
+		end
+	end
+	local function layout()
+		local viewport = gui.AbsoluteSize
+		local compact = viewport.X < 800 or viewport.Y < 560
+		if compact then
+			local width = math.max(1, (viewport.X - 32) / 2)
+			panel.AnchorPoint = Vector2.zero
+			panel.Position, panel.Size = UDim2.fromOffset(20 + width, 126), UDim2.fromOffset(width, 156)
+			title.Position, title.Size, title.TextSize = UDim2.fromOffset(12, 8), UDim2.new(1, -24, 0, 20), 14
+			current.Position, current.Size, current.TextSize = UDim2.fromOffset(12, 30), UDim2.new(1, -24, 0, 18), 12
+			feedback.Position, feedback.Size, feedback.TextSize = UDim2.fromOffset(12, 94), UDim2.new(1, -24, 0, 54), 12
+			for index, classId in { "warlock", "warrior" } do
+				local button = buttons[classId]
+				button.Position, button.Size = UDim2.new((index - 1) / 2, if index == 1 then 12 else 4, 0, 54), UDim2.new(0.5, -16, 0, 34)
+				button.TextSize = 13
+			end
+		else
+			panel.AnchorPoint = Vector2.new(1, 1)
+			panel.Position, panel.Size = UDim2.new(1, -12, 1, -104), UDim2.fromOffset(220, 202)
+			title.Position, title.Size, title.TextSize = UDim2.fromOffset(12, 8), UDim2.new(1, -24, 0, 22), 16
+			current.Position, current.Size, current.TextSize = UDim2.fromOffset(12, 32), UDim2.new(1, -24, 0, 20), 14
+			feedback.Position, feedback.Size, feedback.TextSize = UDim2.fromOffset(12, 142), UDim2.new(1, -24, 0, 52), 13
+			for index, classId in { "warlock", "warrior" } do
+				local button = buttons[classId]
+				button.Position, button.Size = UDim2.fromOffset(12, 60 + (index - 1) * 40), UDim2.new(1, -24, 0, 34)
+				button.TextSize = 15
+			end
+		end
+		playerList(compact and gui.Enabled)
+	end
+	table.insert(connections, gui:GetPropertyChangedSignal("AbsoluteSize"):Connect(layout))
 	gui.Parent = playerGui
+	layout()
 	return {
 		setAction = function(action: (string) -> ()) callback = action end,
 		show = function(state: any, pending: boolean, note: string)
             gui.Enabled = state ~= nil and not state.locked
-            local camera = workspace.CurrentCamera
-            local compact = camera ~= nil and camera.ViewportSize.Y < 560
-            panel.AnchorPoint = Vector2.new(if compact then 0.5 else 1, 1)
-            panel.Position = if compact then UDim2.new(0.5, 0, 1, -104) else UDim2.new(1, -12, 1, -104)
 			current.Text = if state then "Сейчас: " .. (names[state.classId] or "Неизвестный класс") else "Подключаемся…"
 			local locked = not state or state.locked or not state.alive
 			feedback.Text = if note ~= "" then note else if pending then "Ожидаем подтверждения сервера…"
@@ -62,9 +104,11 @@ function ClassHud.new(playerGui: PlayerGui)
 				button.Text = (if selected then "✓ " else "") .. names[classId]
 				button.BackgroundColor3 = if selected then Color3.fromRGB(66, 93, 78) else if enabled[classId] then Color3.fromRGB(78, 53, 105) else Color3.fromRGB(49, 43, 57)
 			end
+			layout()
 		end,
 		destroy = function()
 			for _, connection in connections do connection:Disconnect() end
+			playerList(false)
 			callback = nil; gui:Destroy()
 		end,
 	}

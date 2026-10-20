@@ -87,10 +87,30 @@ function MatchHud.new(playerGui: PlayerGui)
 	local title = label(actions, "Title", 10, 25, 18)
 	local status = label(actions, "Status", 39, 77, 15)
 	local feedback = label(actions, "Feedback", 116, 51, 14)
+	local statusLimit = Instance.new("UITextSizeConstraint")
+	statusLimit.MinTextSize, statusLimit.MaxTextSize, statusLimit.Parent = 11, 13, status
+	local feedbackLimit = Instance.new("UITextSizeConstraint")
+	feedbackLimit.MinTextSize, feedbackLimit.MaxTextSize, feedbackLimit.Parent = 10, 12, feedback
 	local readyButton = button(actions, "ReadyButton")
 	local exitButton = button(actions, "ExitButton")
 	readyButton.Position = UDim2.fromOffset(14, 168)
 	exitButton.Position = UDim2.fromOffset(14, 168)
+	local actionLimit = actions:FindFirstChildOfClass("UISizeConstraint") :: UISizeConstraint
+	local function layout()
+		local viewport = gui.AbsoluteSize
+		local compact = viewport.X < 800 or viewport.Y < 560
+		actions.Size = if compact then UDim2.fromOffset(math.max(1, (viewport.X - 32) / 2), 156) else UDim2.new(0.94, 0, 0, 214)
+		actionLimit.MaxSize = Vector2.new(if compact then 1000 else 330, 1000)
+		title.Position, title.Size, title.TextSize = UDim2.fromOffset(14, if compact then 8 else 10), UDim2.new(1, -28, 0, if compact then 20 else 25), if compact then 15 else 18
+		status.Position, status.Size, status.TextSize = UDim2.fromOffset(14, if compact then 32 else 39), UDim2.new(1, -28, 0, if compact then 48 else 77), if compact then 13 else 15
+		feedback.Position, feedback.Size, feedback.TextSize = UDim2.fromOffset(14, if compact then 84 else 116), UDim2.new(1, -28, 0, if compact then 28 else 51), if compact then 12 else 14
+		status.TextScaled, feedback.TextScaled = compact, compact
+		for _, action in { readyButton, exitButton } do
+			action.Position, action.Size = UDim2.fromOffset(14, if compact then 116 else 168), UDim2.new(1, -28, 0, if compact then 32 else 38)
+			action.TextSize = if compact then 14 else 16
+		end
+	end
+	local sizeConnection = gui:GetPropertyChangedSignal("AbsoluteSize"):Connect(layout)
 	local callback: ((string) -> ())? = nil
 	local readyAction = "ready"
 	local pendingAction = true
@@ -101,9 +121,11 @@ function MatchHud.new(playerGui: PlayerGui)
 		if not pendingAction and callback then callback("exit") end
 	end)
 	gui.Parent = playerGui
+	layout()
 	return {
 		setAction = function(action: (string) -> ()) callback = action end,
 		show = function(state: any, pending: boolean, note: string)
+			layout()
 			local character = game:GetService("Players").LocalPlayer.Character
 			local className = if character and character:GetAttribute("CombatClass") == "warrior" then "Воин" else "Чернокнижник"
 			pendingAction = pending
@@ -157,6 +179,7 @@ function MatchHud.new(playerGui: PlayerGui)
 		end,
 		destroy = function()
 			readyConnection:Disconnect(); exitConnection:Disconnect()
+			sizeConnection:Disconnect()
 			callback = nil
 			gui:Destroy()
 		end,
