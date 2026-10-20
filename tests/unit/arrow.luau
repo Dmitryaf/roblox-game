@@ -38,11 +38,25 @@ end
 
 test("prepare -> launch -> one teleport at authoritative position", function()
 	local f = fixture(); local id = f.cast()
+	assert(f.events[1].direction == Vector3.xAxis, "Preparation must expose the accepted aim to observers")
 	assert(not f.service.teleport(1, 10, id, 0.1))
-	assert(f.service.teleport(1, 10, id, 0.82))
+	assert(f.service.teleport(1, 10, id, Config.windup + 0.5))
 	assert(#f.moves == 1 and math.abs(f.moves[1][2].X - 29) < 0.001)
-	assert(not f.service.teleport(1, 10, id, 0.83))
+	assert(not f.service.teleport(1, 10, id, Config.windup + 0.51))
 	assert(#f.moves == 1 and #f.damages == 0)
+end)
+test("approved 0.7s windup and snapshots share authoritative start", function()
+	local f = fixture(); f.now = 10; local id = f.cast()
+	assert(Config.windup == 0.7)
+	assert(f.events[1].startedAt == 10 and f.events[1].launchAt == 10.7)
+	local snapshot = f.service.snapshot(1).active[1]
+	assert(snapshot.startedAt == 10 and snapshot.launchAt == 10.7 and snapshot.kind == "preparing")
+	for _, at in { 10.32, 10.699 } do
+		local ok, reason = f.service.teleport(1, 10, id, at)
+		assert(not ok and reason == "preparing" and #f.events == 1 and #f.moves == 0)
+	end
+	assert(f.service.teleport(1, 10, id, 10.7))
+	assert(f.events[2].kind == "launched" and #f.moves == 1 and f.moves[1][2].X == 0)
 end)
 test("another owner and previous life cannot consume arrow", function()
 	local f = fixture(); local id = f.cast()

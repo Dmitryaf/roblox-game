@@ -108,7 +108,7 @@ function ArrowService.new(ports: Ports, config: Config)
 		if not cast then return false, reason end
 		projectiles[owner] = { cast = cast, position = nil, direction = direction, sampledAt = cast.launchAt }
 		ports.emit({ kind = "preparing", owner = owner, life = life, castId = cast.id,
-			launchAt = cast.launchAt, expiresAt = cast.expiresAt, readyAt = state.readyAt })
+			direction = direction, startedAt = now, launchAt = cast.launchAt, expiresAt = cast.expiresAt, readyAt = state.readyAt })
 		return true, nil
 	end
 
@@ -137,7 +137,7 @@ function ArrowService.new(ports: Ports, config: Config)
 			local cast = projectile.cast
 			table.insert(active, { kind = cast.phase, owner = id, life = cast.life, castId = cast.id,
 				position = projectile.position, direction = projectile.direction, speed = config.speed,
-				launchAt = cast.launchAt, expiresAt = cast.expiresAt, sampledAt = projectile.sampledAt })
+				startedAt = cast.launchAt - config.windup, launchAt = cast.launchAt, expiresAt = cast.expiresAt, sampledAt = projectile.sampledAt })
 		end
 		return { life = if state then state.life else 0, alive = state ~= nil and state.alive, suspended = paused[owner] ~= nil,
 			readyAt = if state then state.readyAt else 0, active = active }

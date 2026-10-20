@@ -15,6 +15,13 @@ local replies = {}
 local inputCount = 0
 local deathCastPending = false
 local staleLifeReply: any = nil
+local renderErrors = {}
+game:GetService("LogService").MessageOut:Connect(function(message, kind)
+	if kind == Enum.MessageType.MessageError then
+		table.insert(renderErrors, message)
+		if #renderErrors > 4 then table.remove(renderErrors, 1) end
+	end
+end)
 UserInputService.InputBegan:Connect(function(input)
 	if input.UserInputType == Enum.UserInputType.MouseButton1 then inputCount += 1 end
 end)
@@ -74,7 +81,9 @@ control.OnClientEvent:Connect(function(command, data)
 		local ok, err = pcall(function()
 			assert(life > data, "Life token did not change after respawn")
 			local effects = workspace:FindFirstChild("LocalArrowEffects")
-			assert(effects and #effects:GetChildren() == 0, "Old life retained effects")
+			local remaining = {}
+			if effects then for _, item in effects:GetChildren() do table.insert(remaining, item.Name) end end
+			assert(effects and #effects:GetChildren() == 0, "Old life retained effects: " .. table.concat(remaining, ", ") .. "\n" .. table.concat(renderErrors, "\n"))
 			remote:FireServer({ action = "cast", requestId = 100003, life = data, direction = Vector3.xAxis })
 			untilTrue(function() return staleLifeReply ~= nil end, 3, "Stale-life request had no reply")
 			assert(not staleLifeReply.ok and staleLifeReply.reason == "stale_life", "Old life accepted after respawn")
@@ -123,7 +132,7 @@ control.OnClientEvent:Connect(function(command, data)
 		untilTrue(function() return launched > 0 end, 4, "Mouse input did not launch arrow")
 		local elapsed = launchReceivedAt - clickedAt
 		print("ArrowInputToLaunchSeconds", elapsed)
-		if data and data > 0 then assert(elapsed >= 0.32 + data / 1000, "Requested network delay was not observed") end
+		if data and data > 0 then assert(elapsed >= 0.7 + data / 1000, "Requested network delay was not observed") end
 		task.wait(0.35)
 		virtual:SendKey(true, Enum.KeyCode.E, false)
 		virtual:SendKey(false, Enum.KeyCode.E, false)
