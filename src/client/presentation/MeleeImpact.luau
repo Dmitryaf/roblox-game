@@ -4,7 +4,8 @@ local Players = game:GetService("Players")
 local MeleeImpact = {}
 type Fragment = { part: Part, origin: Vector3, velocity: Vector3, rotation: CFrame }
 type Burst = { folder: Folder, owner: number, life: number, swingId: number, at: number, parts: { Fragment } }
-function MeleeImpact.new(parent: Instance)
+function MeleeImpact.new(parent: Instance, style: string?)
+    local heavy = style == "heavy"
     local bursts: { [string]: Burst } = {}
     local retired: { [string]: number } = {}
     local impact = {}
@@ -26,31 +27,34 @@ function MeleeImpact.new(parent: Instance)
         end
         if count >= 12 and oldest then remove(oldest) end
         local folder = Instance.new("Folder")
-        folder.Name, folder.Parent = "ConfirmedSwordImpact", parent
+        folder.Name, folder.Parent = if heavy then "ConfirmedHeavyImpact" else "ConfirmedSwordImpact", parent
         local parts: { Fragment } = {}
         local direction = event.direction * Vector3.new(1, 0, 1)
         direction = if direction.Magnitude > 0.1 then direction.Unit else Vector3.new(0, 0, -1)
         local right = Vector3.new(-direction.Z, 0, direction.X)
-        for index = 1, 12 do
-            local angle = index * math.pi * 2 / 12
+        local fragments = if heavy then 16 else 12
+        for index = 1, fragments do
+            local angle = index * math.pi * 2 / fragments
             local axis = right * math.cos(angle) + Vector3.yAxis * math.sin(angle)
             local shard = Instance.new("Part")
-            shard.Name, shard.Size, shard.Material = "SwordContactSpark", Vector3.new(0.07, 0.07, 0.55 + index % 3 * 0.2), Enum.Material.Neon
+            shard.Name = if heavy then "HeavyContactSpark" else "SwordContactSpark"
+            shard.Size, shard.Material = Vector3.new(if heavy then 0.11 else 0.07, if heavy then 0.11 else 0.07, (if heavy then 0.9 else 0.55) + index % 3 * 0.2), Enum.Material.Neon
             shard.Color = if index % 3 == 0 then Color3.fromRGB(166, 61, 39) else Color3.fromRGB(255, 220, 160)
             shard.Anchored, shard.Massless, shard.CanCollide, shard.CanTouch, shard.CanQuery, shard.CastShadow = true, true, false, false, false, false
             local origin = event.position - direction * 0.35
             shard.CFrame, shard.Parent = CFrame.lookAt(origin, origin + axis), folder
-            table.insert(parts, { part = shard, origin = origin, velocity = axis * (6 + index % 4 * 2) - direction * 2,
+            table.insert(parts, { part = shard, origin = origin, velocity = axis * (6 + index % 4 * 2) * (if heavy then 1.2 else 1) - direction * 2,
                 rotation = shard.CFrame.Rotation })
         end
         local core = Instance.new("Part")
-        core.Name, core.Shape, core.Size = "SwordContactFlash", Enum.PartType.Ball, Vector3.new(1.2, 1.2, 1.2)
+        core.Name, core.Shape, core.Size = if heavy then "HeavyContactFlash" else "SwordContactFlash", Enum.PartType.Ball, Vector3.one * (if heavy then 1.9 else 1.2)
         core.Anchored, core.Massless, core.CanCollide, core.CanQuery, core.CanTouch, core.CastShadow = true, true, false, false, false, false
         core.Color, core.Material, core.Transparency = Color3.fromRGB(255, 226, 172), Enum.Material.Neon, 0.35
         core.CFrame, core.Parent = CFrame.new(event.position), folder
         table.insert(parts, { part = core, origin = event.position, velocity = Vector3.zero, rotation = CFrame.identity })
         local sound = Instance.new("Sound")
-        sound.Name, sound.SoundId, sound.Volume = "SwordContactWeight", "rbxasset://sounds/warrior-v1/impact.wav", 0.5
+        sound.Name, sound.SoundId, sound.Volume = if heavy then "HeavyContactWeight" else "SwordContactWeight", "rbxasset://sounds/warrior-v1/impact.wav", if heavy then 0.6 else 0.5
+        sound.PlaybackSpeed = if heavy then 0.82 else 1
         sound.RollOffMinDistance, sound.RollOffMaxDistance, sound.Parent = 8, 70, core
         sound:Play()
         bursts[key] = { folder = folder, owner = event.owner, life = event.life, swingId = event.swingId, at = now, parts = parts }
@@ -66,12 +70,12 @@ function MeleeImpact.new(parent: Instance)
             local humanoid = if character then character:FindFirstChildOfClass("Humanoid") else nil
             local root = if character then character:FindFirstChild("HumanoidRootPart") else nil
             local age = now - burst.at
-            if age >= 0.42 or not character or character:GetAttribute("CombatLife") ~= burst.life
+            if age >= (if heavy then 0.52 else 0.42) or not character or character:GetAttribute("CombatLife") ~= burst.life
                 or character:GetAttribute("CombatClass") ~= "warrior" or not humanoid or humanoid.Health <= 0
                 or not root or not root:IsA("BasePart") or root.Anchored then remove(key); continue end
             for _, item in burst.parts do
-                local flash = item.part.Name == "SwordContactFlash"
-                local duration = if flash then 0.10 else 0.28
+                local flash = item.part.Name == (if heavy then "HeavyContactFlash" else "SwordContactFlash")
+                local duration = if flash then (if heavy then 0.14 else 0.10) else (if heavy then 0.36 else 0.28)
                 local fade = math.clamp(age / duration, 0, 1)
                 item.part.Transparency = if flash then 0.35 + fade * 0.65 else fade
                 item.part.CFrame = CFrame.new(item.origin + item.velocity * age + (if flash then Vector3.zero else Vector3.new(0, -11 * age * age, 0))) * item.rotation

@@ -18,6 +18,7 @@ local MeleeController = require(script.Parent.controllers.MeleeController)
 local MeleeHud = require(script.Parent.presentation.MeleeHud)
 local MeleeEffects = require(script.Parent.presentation.MeleeEffects)
 local MeleeInput = require(script.Parent.input.MeleeInput)
+local HeavyHud = require(script.Parent.presentation.HeavyHud)
 local DashController = require(script.Parent.controllers.DashController)
 local DashHud = require(script.Parent.presentation.DashHud)
 local DashEffects = require(script.Parent.presentation.DashEffects)
@@ -36,6 +37,7 @@ local stop = Controller.start(player, remote, Hud.new(gui), arrowEffects, Input.
 local stopClass: (() -> ())? = nil
 local stopMelee: (() -> ())? = nil
 local stopDash: (() -> ())? = nil
+local stopHeavy: (() -> ())? = nil
 local warrior = WarriorAppearance.new()
 local appearanceStep = RunService.RenderStepped:Connect(function() warrior.step(workspace:GetServerTimeNow()) end)
 local stopHands: (() -> ())? = nil
@@ -46,6 +48,10 @@ if ReplicatedStorage:GetAttribute("MatchEnabled") == true then
     assert(meleeRemote and meleeRemote:IsA("RemoteEvent"), "Melee server did not initialize")
     stopClass = ClassController.start(player, classRemote, ClassHud.new(gui))
     stopMelee = MeleeController.start(player, meleeRemote, MeleeHud.new(gui), MeleeEffects.new(warriorPose), MeleeInput.bind)
+    local heavyRemote = ReplicatedStorage:WaitForChild("HeavyRemote", 15)
+    assert(heavyRemote and heavyRemote:IsA("RemoteEvent"), "Heavy strike server did not initialize")
+    stopHeavy = MeleeController.start(player, heavyRemote, HeavyHud.new(gui),
+        MeleeEffects.new(warriorPose, "heavy"), MeleeInput.bindHeavy, "heavy")
     local dashRemote = ReplicatedStorage:WaitForChild("DashRemote", 15)
     assert(dashRemote and dashRemote:IsA("RemoteEvent"), "Dash server did not initialize")
     stopDash = DashController.start(player, dashRemote, DashHud.new(gui), DashEffects.new(warriorPose), DashInput.bind)
@@ -65,6 +71,7 @@ script.Destroying:Connect(function()
 	if stopClass then stopClass() end
 	if stopMelee then stopMelee() end
 	if stopDash then stopDash() end
+	if stopHeavy then stopHeavy() end
 	if stopHands then stopHands() end
 	stop()
 	if stopMatch then stopMatch() end

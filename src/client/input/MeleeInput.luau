@@ -3,7 +3,7 @@ local ContextActionService = game:GetService("ContextActionService")
 local UserInputService = game:GetService("UserInputService")
 local GuiService = game:GetService("GuiService")
 local MeleeInput = {}
-function MeleeInput.bind(player: Player, swing: (Vector3) -> ())
+local function bind(player: Player, swing: (Vector3) -> (), heavy: boolean)
 	local function attack(_: string, state: Enum.UserInputState)
 		local character = player.Character
 		if not character or character:GetAttribute("CombatClass") ~= "warrior" then return Enum.ContextActionResult.Pass end
@@ -29,7 +29,10 @@ function MeleeInput.bind(player: Player, swing: (Vector3) -> ())
 		swing(direction.Unit)
 		return Enum.ContextActionResult.Sink
 	end
-	ContextActionService:BindAction("WarriorSwing", attack, false, Enum.UserInputType.MouseButton1)
-	return function() ContextActionService:UnbindAction("WarriorSwing") end
+	local name = if heavy then "WarriorHeavyStrike" else "WarriorSwing"
+    ContextActionService:BindAction(name, attack, false, if heavy then Enum.KeyCode.Q else Enum.UserInputType.MouseButton1)
+    return function() ContextActionService:UnbindAction(name) end
 end
+function MeleeInput.bind(player: Player, swing: (Vector3) -> ()) return bind(player, swing, false) end
+function MeleeInput.bindHeavy(player: Player, swing: (Vector3) -> ()) return bind(player, swing, true) end
 return MeleeInput

@@ -4,6 +4,7 @@ local RunService = game:GetService("RunService")
 local Motion = require(script.Parent.MeleeMotion)
 local DashMotion = require(script.Parent.DashPoseMotion)
 local Facing = require(script.Parent.MeleeFacing)
+local HeavyMotion: any = nil
 local MeleePose = {}
 type Motor = Motor6D | AnimationConstraint
 type Joint = { motor: Motor, rest: CFrame, keys: { Vector3 }, body: boolean, torso: boolean, base: CFrame?, applied: CFrame? }
@@ -77,6 +78,20 @@ function MeleePose.new()
             started = now, hitAt = now, expires = now + math.clamp(duration, 0.18, 0.28), received = now,
             facing = nil, kind = "dash", id = dashId, life = character:GetAttribute("CombatLife") }
     end
+    function pose.beginHeavy(owner: number, hitAt: number, startedAt: number?, expiresAt: number?, direction: Vector3?, swingId: number?)
+        HeavyMotion = HeavyMotion or require(script.Parent.HeavyMotion)
+        pose.stop(owner)
+        local player = Players:GetPlayerByUserId(owner)
+        local character = if player then player.Character else nil
+        local humanoid = if character then character:FindFirstChildOfClass("Humanoid") else nil
+        if not character or not humanoid or humanoid.Health <= 0 then return end
+        local root = character:FindFirstChild("HumanoidRootPart")
+        swings[owner] = { character = character, humanoid = humanoid, joints = collect(character, HeavyMotion.channels),
+            root = if root and root:IsA("BasePart") then root else nil, direction = direction,
+            started = startedAt or hitAt - 0.65, hitAt = hitAt, expires = expiresAt or hitAt + 0.6,
+            received = workspace:GetServerTimeNow(), kind = "heavy", id = swingId, life = character:GetAttribute("CombatLife"),
+            facing = if player == Players.LocalPlayer and direction then Facing.new(character, direction) else nil }
+    end
     function pose.step(now: number)
         for owner, swing in swings do
             local player = Players:GetPlayerByUserId(owner)
@@ -95,8 +110,12 @@ function MeleePose.new()
         for _, swing in swings do
             if swing.facing then swing.facing.step(now, swing.hitAt, delta) end
             local isDash = swing.kind == "dash"
-            local time = if isDash then DashMotion.time(now, swing.started, swing.expires) else Motion.time(now, swing.started, swing.hitAt, swing.expires)
-            local weight = if isDash then DashMotion.weight(time) else Motion.weight(time, now - swing.received)
+            local isHeavy = swing.kind == "heavy"
+            local time = if isDash then DashMotion.time(now, swing.started, swing.expires)
+                else if isHeavy then HeavyMotion.time(now, swing.started, swing.hitAt, swing.expires)
+                else Motion.time(now, swing.started, swing.hitAt, swing.expires)
+            local weight = if isDash then DashMotion.weight(time)
+                else if isHeavy then HeavyMotion.weight(time, now - swing.received) else Motion.weight(time, now - swing.received)
             local running = swing.humanoid.MoveDirection.Magnitude > 0.1
             local aim = 0
             if swing.root and swing.direction then
@@ -111,7 +130,8 @@ function MeleePose.new()
                 -- PreAnimation normally restores us; this also covers throttled Animator frames.
                 restore(joint)
                 local base = joint.motor.Transform
-                local angles = if isDash then DashMotion.sample(joint.keys, time) else Motion.sample(joint.keys, time)
+                local angles = if isDash then DashMotion.sample(joint.keys, time)
+                    else if isHeavy then HeavyMotion.sample(joint.keys, time) else Motion.sample(joint.keys, time)
                 if isDash and joint.torso and swing.root and swing.direction then
                     local localDirection = swing.root.CFrame:VectorToObjectSpace(swing.direction)
                     angles = Vector3.new(localDirection.Z * math.abs(angles.X), angles.Y, angles.Z - localDirection.X * math.abs(angles.X) * 0.7)
@@ -119,7 +139,7 @@ function MeleePose.new()
                 local rotation = joint.rest:Inverse() * CFrame.Angles(angles.X, angles.Y, angles.Z) * joint.rest
                 local target: CFrame
                 if joint.body then
-                    local amplitude = if running and not isDash then 0.5 else 1
+                    local amplitude = if running and not isDash then (if isHeavy then 0.75 else 0.5) else 1
                     target = CFrame.identity:Lerp(rotation, amplitude) * base
                     if not isDash and (joint.motor.Name == "Waist" or joint.motor.Name == "RootJoint") then
                         target = joint.rest:Inverse() * CFrame.Angles(0, aim * 0.65, 0) * joint.rest * target
