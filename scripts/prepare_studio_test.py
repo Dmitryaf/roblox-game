@@ -11,9 +11,10 @@ match = "--match" in sys.argv
 hands = "--hands" in sys.argv
 warrior = "--warrior" in sys.argv
 dash = "--dash" in sys.argv
+contact = "--contact" in sys.argv
 clients = int(sys.argv[sys.argv.index("--clients") + 1]) if "--clients" in sys.argv else 2
 assert clients in (2, 6)
-assert not (warrior or dash) or clients == 2, "Warrior/dash fixtures require two clients"
+assert not (warrior or dash or contact) or clients == 2, "Warrior/dash/contact fixtures require two clients"
 lag_ms = int(sys.argv[sys.argv.index("--lag-ms") + 1]) if "--lag-ms" in sys.argv else 0
 project = json.loads((ROOT / "default.project.json").read_text())
 project["tree"]["ReplicatedStorage"]["StudioTestToken"] = {
@@ -22,7 +23,8 @@ project["tree"]["ReplicatedStorage"]["StudioTestToken"] = {
 project["tree"]["ServerStorage"] = {"StudioWorldTests": {"$path": str(ROOT / "tests/studio/world.luau")}}
 project["tree"]["ServerStorage"]["MatchWorldTests"] = {"$path": str(ROOT / "tests/studio/match_world.luau")}
 project["tree"]["ServerStorage"]["DashWorldTests"] = {"$path": str(ROOT / "tests/studio/dash_world.luau")}
-if not (match or hands or warrior or dash):
+project["tree"]["ServerStorage"]["MovementContactWorldTests"] = {"$path": str(ROOT / "tests/studio/movement_contact_world.luau")}
+if not (match or hands or warrior or dash or contact):
     # Preserve the original arrow fixture and expectations as the main place grows.
     project["tree"]["ServerScriptService"]["Game"] = {
         name: {"$path": str(ROOT / "src/server" / name)}
@@ -60,6 +62,13 @@ if dash:
     project["tree"]["ReplicatedStorage"]["DashTestDriver"] = {"$path": str(ROOT / "tests/studio/client/DashDriver.luau")}
     project["tree"]["ServerScriptService"]["DashTest"] = {"$path": str(ROOT / "tests/studio/dash.server.luau")}
     project["tree"]["StarterPlayer"]["StarterPlayerScripts"]["DashTest"] = {"$path": str(ROOT / "tests/studio/dash.client.luau")}
+if contact:
+    project["tree"]["ServerStorage"]["$attributes"] = {"MatchTest": True, "ContactTest": True}
+    project["tree"]["ReplicatedStorage"]["ContactTestControl"] = {"$className": "RemoteEvent"}
+    project["tree"]["ReplicatedStorage"]["ContactClassDriver"] = {"$path": str(ROOT / "tests/studio/client/DashDriver.luau")}
+    project["tree"]["ReplicatedStorage"]["ContactTestDriver"] = {"$path": str(ROOT / "tests/studio/client/ContactDriver.luau")}
+    project["tree"]["ServerScriptService"]["ContactTest"] = {"$path": str(ROOT / "tests/studio/contact.server.luau")}
+    project["tree"]["StarterPlayer"]["StarterPlayerScripts"]["ContactTest"] = {"$path": str(ROOT / "tests/studio/contact.client.luau")}
 # This project lives in build/, so resolve source paths before writing it.
 def absolute_paths(value):
     if isinstance(value, dict):
@@ -70,8 +79,8 @@ def absolute_paths(value):
                 absolute_paths(item)
 absolute_paths(project)
 (ROOT / "build/studio-test.project.json").write_text(json.dumps(project), encoding="utf-8")
-runtime_test = multiplayer or match or hands or warrior or dash
-test_expression = f'game:GetService("StudioTestService"):ExecuteMultiplayerTestAsync({clients}, {{ lagMs = {lag_ms}, clients = {clients} }})' if runtime_test else '(function() assert(require(game:GetService("ServerStorage"):WaitForChild("StudioWorldTests", 10))); assert(require(game:GetService("ServerStorage"):WaitForChild("MatchWorldTests", 10))); return require(game:GetService("ServerStorage"):WaitForChild("DashWorldTests", 10)) end)()'
+runtime_test = multiplayer or match or hands or warrior or dash or contact
+test_expression = f'game:GetService("StudioTestService"):ExecuteMultiplayerTestAsync({clients}, {{ lagMs = {lag_ms}, clients = {clients} }})' if runtime_test else '(function() assert(require(game:GetService("ServerStorage"):WaitForChild("StudioWorldTests", 10))); assert(require(game:GetService("ServerStorage"):WaitForChild("MatchWorldTests", 10))); assert(require(game:GetService("ServerStorage"):WaitForChild("DashWorldTests", 10))); assert(require(game:GetService("ServerStorage"):WaitForChild("MovementContactWorldTests", 10)).run()); return true end)()'
 plugin = f'''--!strict
 task.defer(function()
     -- A freshly created test server/client can load plugins before simulation starts.
@@ -88,6 +97,7 @@ task.defer(function()
     local ok, result = xpcall(function()
         if {str(runtime_test).lower()} then
             for key, value in values do previous[key] = network[key]; network[key] = value end
+            print("{token} previous network delay", previous.InboundNetworkMinDelayMs, previous.OutboundNetworkMinDelayMs)
         end
         return {test_expression}
     end, debug.traceback)

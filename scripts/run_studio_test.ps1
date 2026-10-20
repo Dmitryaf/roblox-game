@@ -5,6 +5,7 @@ param(
     [switch]$Hands,
     [switch]$Warrior,
     [switch]$Dash,
+    [switch]$Contact,
     [ValidateSet(2,6)][int]$Clients = 2,
     [ValidateRange(0,500)][int]$LagMs = 0
 )
@@ -14,9 +15,10 @@ if (-not (Test-Path -LiteralPath $StudioExe)) { throw 'Studio executable not fou
 $taskRobloxRoot = Split-Path (Split-Path (Split-Path $StudioExe -Parent) -Parent) -Parent
 $taskPluginDir = Join-Path $taskRobloxRoot 'Plugins'
 $taskLogDir = Join-Path $taskRobloxRoot 'logs'
-if (([int]$Match.IsPresent + [int]$Multiplayer.IsPresent + [int]$Hands.IsPresent + [int]$Warrior.IsPresent + [int]$Dash.IsPresent) -gt 1) { throw 'Choose one runtime fixture' }
-if (($Warrior -or $Dash) -and $Clients -ne 2) { throw 'Warrior/dash fixtures require two clients' }
-if ($Dash) { python scripts/prepare_studio_test.py --dash --clients $Clients --lag-ms $LagMs }
+if (([int]$Match.IsPresent + [int]$Multiplayer.IsPresent + [int]$Hands.IsPresent + [int]$Warrior.IsPresent + [int]$Dash.IsPresent + [int]$Contact.IsPresent) -gt 1) { throw 'Choose one runtime fixture' }
+if (($Warrior -or $Dash -or $Contact) -and $Clients -ne 2) { throw 'Warrior/dash/contact fixtures require two clients' }
+if ($Contact) { python scripts/prepare_studio_test.py --contact --clients $Clients --lag-ms $LagMs }
+elseif ($Dash) { python scripts/prepare_studio_test.py --dash --clients $Clients --lag-ms $LagMs }
 elseif ($Warrior) { python scripts/prepare_studio_test.py --warrior --clients $Clients --lag-ms $LagMs }
 elseif ($Hands) { python scripts/prepare_studio_test.py --hands --clients $Clients --lag-ms $LagMs }
 elseif ($Match) { python scripts/prepare_studio_test.py --match --clients $Clients --lag-ms $LagMs }
@@ -33,7 +35,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Could not build test plugin' }
 if ($LASTEXITCODE -ne 0) { throw 'Could not map Studio test' }
 Push-Location build
 try {
-    $taskTestSources = if ($Multiplayer -or $Match -or $Hands -or $Warrior -or $Dash) { '../tests/studio' } else { @('../tests/studio/world.luau', '../tests/studio/match_world.luau', '../tests/studio/dash_world.luau') }
+    $taskTestSources = if ($Multiplayer -or $Match -or $Hands -or $Warrior -or $Dash -or $Contact) { '../tests/studio' } else { @('../tests/studio/world.luau', '../tests/studio/match_world.luau', '../tests/studio/dash_world.luau', '../tests/studio/movement_contact_world.luau') }
     & ../.tools/luau-lsp/luau-lsp.exe analyze --platform roblox --sourcemap studio-sourcemap.json --definitions ../.tools/roblox.d.luau $taskTestSources
     if ($LASTEXITCODE -ne 0) { throw 'Studio test type check failed' }
 } finally { Pop-Location }

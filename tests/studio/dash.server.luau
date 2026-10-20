@@ -200,8 +200,9 @@ local ok, problem = xpcall(function()
 	assert(deathTrace.constrained and deathTrace.cleaned and deathTrace.cancelledAt < deathTrace.startedAt + 0.28,
 		"Death did not remove an active dash constraint before its natural expiry")
 	waitFor(function()
-		return fighter.Character ~= nil and fighter.Character ~= oldCharacter
-			and fighter.Character:GetAttribute("CombatLife") > oldLife
+		local character = fighter.Character
+		local life = if character then character:GetAttribute("CombatLife") else nil
+		return character ~= nil and character ~= oldCharacter and type(life) == "number" and life > oldLife
 	end, 12, "Dash owner did not respawn into a new life")
 	waitFor(function() return command(fighter, "inspect").state.life == (fighter.Character :: Model):GetAttribute("CombatLife") end,
 		5, "New life dash snapshot not received")
