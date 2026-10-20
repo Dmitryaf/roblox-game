@@ -10,9 +10,10 @@ multiplayer = "--multiplayer" in sys.argv
 match = "--match" in sys.argv
 hands = "--hands" in sys.argv
 warrior = "--warrior" in sys.argv
+dash = "--dash" in sys.argv
 clients = int(sys.argv[sys.argv.index("--clients") + 1]) if "--clients" in sys.argv else 2
 assert clients in (2, 6)
-assert not warrior or clients == 2, "Warrior fixture requires two clients"
+assert not (warrior or dash) or clients == 2, "Warrior/dash fixtures require two clients"
 lag_ms = int(sys.argv[sys.argv.index("--lag-ms") + 1]) if "--lag-ms" in sys.argv else 0
 project = json.loads((ROOT / "default.project.json").read_text())
 project["tree"]["ReplicatedStorage"]["StudioTestToken"] = {
@@ -20,7 +21,8 @@ project["tree"]["ReplicatedStorage"]["StudioTestToken"] = {
 }
 project["tree"]["ServerStorage"] = {"StudioWorldTests": {"$path": str(ROOT / "tests/studio/world.luau")}}
 project["tree"]["ServerStorage"]["MatchWorldTests"] = {"$path": str(ROOT / "tests/studio/match_world.luau")}
-if not (match or hands or warrior):
+project["tree"]["ServerStorage"]["DashWorldTests"] = {"$path": str(ROOT / "tests/studio/dash_world.luau")}
+if not (match or hands or warrior or dash):
     # Preserve the original arrow fixture and expectations as the main place grows.
     project["tree"]["ServerScriptService"]["Game"] = {
         name: {"$path": str(ROOT / "src/server" / name)}
@@ -52,6 +54,12 @@ if warrior:
     project["tree"]["ReplicatedStorage"]["WarriorMotionProbe"] = {"$path": str(ROOT / "tests/studio/client/WarriorMotionProbe.luau")}
     project["tree"]["ServerScriptService"]["WarriorTest"] = {"$path": str(ROOT / "tests/studio/warrior.server.luau")}
     project["tree"]["StarterPlayer"]["StarterPlayerScripts"]["WarriorTest"] = {"$path": str(ROOT / "tests/studio/warrior.client.luau")}
+if dash:
+    project["tree"]["ServerStorage"]["$attributes"] = {"MatchTest": True, "DashTest": True}
+    project["tree"]["ReplicatedStorage"]["DashTestControl"] = {"$className": "RemoteEvent"}
+    project["tree"]["ReplicatedStorage"]["DashTestDriver"] = {"$path": str(ROOT / "tests/studio/client/DashDriver.luau")}
+    project["tree"]["ServerScriptService"]["DashTest"] = {"$path": str(ROOT / "tests/studio/dash.server.luau")}
+    project["tree"]["StarterPlayer"]["StarterPlayerScripts"]["DashTest"] = {"$path": str(ROOT / "tests/studio/dash.client.luau")}
 # This project lives in build/, so resolve source paths before writing it.
 def absolute_paths(value):
     if isinstance(value, dict):
@@ -62,8 +70,8 @@ def absolute_paths(value):
                 absolute_paths(item)
 absolute_paths(project)
 (ROOT / "build/studio-test.project.json").write_text(json.dumps(project), encoding="utf-8")
-runtime_test = multiplayer or match or hands or warrior
-test_expression = f'game:GetService("StudioTestService"):ExecuteMultiplayerTestAsync({clients}, {{ lagMs = {lag_ms}, clients = {clients} }})' if runtime_test else '(function() assert(require(game:GetService("ServerStorage"):WaitForChild("StudioWorldTests", 10))); return require(game:GetService("ServerStorage"):WaitForChild("MatchWorldTests", 10)) end)()'
+runtime_test = multiplayer or match or hands or warrior or dash
+test_expression = f'game:GetService("StudioTestService"):ExecuteMultiplayerTestAsync({clients}, {{ lagMs = {lag_ms}, clients = {clients} }})' if runtime_test else '(function() assert(require(game:GetService("ServerStorage"):WaitForChild("StudioWorldTests", 10))); assert(require(game:GetService("ServerStorage"):WaitForChild("MatchWorldTests", 10))); return require(game:GetService("ServerStorage"):WaitForChild("DashWorldTests", 10)) end)()'
 plugin = f'''--!strict
 task.defer(function()
     -- A freshly created test server/client can load plugins before simulation starts.
