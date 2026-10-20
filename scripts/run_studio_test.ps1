@@ -3,6 +3,7 @@ param(
     [switch]$Multiplayer,
     [switch]$Match,
     [switch]$Hands,
+    [switch]$Warrior,
     [ValidateSet(2,6)][int]$Clients = 2,
     [ValidateRange(0,500)][int]$LagMs = 0
 )
@@ -12,8 +13,10 @@ if (-not (Test-Path -LiteralPath $StudioExe)) { throw 'Studio executable not fou
 $taskRobloxRoot = Split-Path (Split-Path (Split-Path $StudioExe -Parent) -Parent) -Parent
 $taskPluginDir = Join-Path $taskRobloxRoot 'Plugins'
 $taskLogDir = Join-Path $taskRobloxRoot 'logs'
-if (([int]$Match.IsPresent + [int]$Multiplayer.IsPresent + [int]$Hands.IsPresent) -gt 1) { throw 'Choose one runtime fixture' }
-if ($Hands) { python scripts/prepare_studio_test.py --hands --clients $Clients --lag-ms $LagMs }
+if (([int]$Match.IsPresent + [int]$Multiplayer.IsPresent + [int]$Hands.IsPresent + [int]$Warrior.IsPresent) -gt 1) { throw 'Choose one runtime fixture' }
+if ($Warrior -and $Clients -ne 2) { throw 'Warrior fixture requires two clients' }
+if ($Warrior) { python scripts/prepare_studio_test.py --warrior --clients $Clients --lag-ms $LagMs }
+elseif ($Hands) { python scripts/prepare_studio_test.py --hands --clients $Clients --lag-ms $LagMs }
 elseif ($Match) { python scripts/prepare_studio_test.py --match --clients $Clients --lag-ms $LagMs }
 elseif ($Multiplayer) { python scripts/prepare_studio_test.py --multiplayer --lag-ms $LagMs }
 else { python scripts/prepare_studio_test.py }
@@ -28,7 +31,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Could not build test plugin' }
 if ($LASTEXITCODE -ne 0) { throw 'Could not map Studio test' }
 Push-Location build
 try {
-    $taskTestSources = if ($Multiplayer -or $Match -or $Hands) { '../tests/studio' } else { '../tests/studio/world.luau' }
+    $taskTestSources = if ($Multiplayer -or $Match -or $Hands -or $Warrior) { '../tests/studio' } else { '../tests/studio/world.luau' }
     & ../.tools/luau-lsp/luau-lsp.exe analyze --platform roblox --sourcemap studio-sourcemap.json --definitions ../.tools/roblox.d.luau $taskTestSources
     if ($LASTEXITCODE -ne 0) { throw 'Studio test type check failed' }
 } finally { Pop-Location }

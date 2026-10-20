@@ -10,7 +10,7 @@ local function enabled(): boolean
 	return RunService:IsStudio() and token ~= nil and token:IsA("StringValue") and ServerStorage:GetAttribute("MatchTest") == true
 end
 function StudioMatchFixture.config(default: any): any
-    if enabled() and ServerStorage:GetAttribute("HandsTest") == true then
+    if enabled() and (ServerStorage:GetAttribute("HandsTest") == true or ServerStorage:GetAttribute("WarriorTest") == true) then
         return { gathering = 0.3, countdown = 0.3, pause = 3, duration = 120, target = 150, noExpansionLast = 5 }
     end
 	return if enabled() then { gathering = 2, countdown = 1, pause = 3, duration = 30, target = 3, noExpansionLast = 5 } else default

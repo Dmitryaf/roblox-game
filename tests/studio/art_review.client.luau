@@ -32,7 +32,7 @@ label.TextWrapped, label.Font = true, Enum.Font.GothamMedium
 label.Text = "РҐСѓРґРѕР¶РµСЃС‚РІРµРЅРЅС‹Р№ РїСЂРѕСЃРјРѕС‚СЂ В· 1/2/3 вЂ” СЂР°РєСѓСЂСЃ В· Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРёР№ РІС‹СЃС‚СЂРµР»"
 label.Parent, gui.Parent = gui, player:WaitForChild("PlayerGui")
 local function hide(item: Instance)
-	if item:IsA("ScreenGui") and (item.Name == "MatchHud" or item.Name == "ArrowHud" or item.Name == "HandsHud") then
+	if item:IsA("ScreenGui") and (item.Name == "MatchHud" or item.Name == "ArrowHud" or item.Name == "HandsHud" or item.Name == "ClassHud" or item.Name == "MeleeHud") then
 		if hidden[item] == nil then hidden[item] = item.Enabled end
 		item.Enabled = false
 	end
@@ -49,6 +49,7 @@ table.insert(connections, UserInputService.InputBegan:Connect(function(input, pr
 	elseif input.KeyCode == Enum.KeyCode.Three then view = 3 end
 end))
 table.insert(connections, RunService.RenderStepped:Connect(function()
+	for item in hidden do if item.Parent then item.Enabled = false end end
 	local camera = workspace.CurrentCamera
 	if not camera then return end
 	camera.CameraType, camera.CFrame, camera.Focus = Enum.CameraType.Scriptable, views[view], CFrame.new(230, 3, -22)

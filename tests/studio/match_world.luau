@@ -2,6 +2,7 @@
 local modules = game:GetService("ServerScriptService"):WaitForChild("Game")
 local Arena = require(modules.adapters.world.MatchArena)
 local World = require(modules.adapters.world.MatchWorld)
+local SwordWorld = require(modules.adapters.world.SwordWorld)
 local arena = Arena.create()
 local contexts: { [number]: any } = { [101] = { mode = "match", team = 1, matchId = 1, frozen = false },
 	[102] = { mode = "training", matchId = 0, frozen = false } }
@@ -118,6 +119,33 @@ local ok, err = xpcall(function()
         local targets = world.areaTargets(102, Vector3.new(230, 0, -30), 8)
         assert(#targets == 1 and targets[1].Parent:GetAttribute("TrainingTarget"), "Hands could not find the real training target")
         assert(#world.areaTargets(101, Vector3.new(230, 0, -30), 8) == 0, "Match hands selected a training target")
+    end)
+    test("sword selects several front targets once and excludes behind, range and height", function()
+        world.move(102, Vector3.new(230, 3.2, -12))
+        local targets: { Humanoid } = {}
+        for index, offset in {Vector3.new(-3, 0, -4), Vector3.new(3, 0, -4), Vector3.new(0, 0, 4), Vector3.new(0, 0, -8), Vector3.new(0, 5, -4)} do
+            local rig = Instance.new("Model")
+            rig.Name = "SwordGeometryTarget" .. index
+            rig:SetAttribute("TrainingTarget", true)
+            local root = Instance.new("Part")
+            root.Name, root.Size, root.Anchored, root.CanCollide = "HumanoidRootPart", Vector3.new(2, 2, 1), true, false
+            root.Position, root.Parent = Vector3.new(230, 3.2, -12) + offset, rig
+            local humanoid = Instance.new("Humanoid")
+            humanoid.RequiresNeck, humanoid.Parent = false, rig
+            rig.Parent = workspace
+            table.insert(rigs, rig); table.insert(targets, humanoid)
+        end
+        local sword = SwordWorld.new(world)
+        local found = sword.targets(102, -Vector3.zAxis, 7, 100)
+        assert(#found == 2 and table.find(found, targets[1]) and table.find(found, targets[2]), "Sword front arc did not select exactly two eligible targets")
+        assert(#sword.targets(102, Vector3.zAxis, 7, 100) == 1, "Sword direction was ignored")
+        assert(#sword.targets(101, -Vector3.zAxis, 7, 100) == 0, "Sword crossed match/training isolation")
+        local wall = Instance.new("Part")
+        wall.Name, wall.Size, wall.Anchored, wall.CanCollide = "SwordGeometryCover", Vector3.new(16, 8, 0.5), true, true
+        wall.Position, wall.Parent = Vector3.new(230, 4, -14), workspace
+        assert(#sword.targets(102, -Vector3.zAxis, 7, 100) == 0, "Sword damaged through physical cover")
+        wall:Destroy()
+        for _, target in targets do if target.Parent then target.Parent:Destroy() end end
     end)
     test("slow movement restores on context reset and body removal", function()
         local humanoid = rigs[2]:FindFirstChildOfClass("Humanoid") :: Humanoid
