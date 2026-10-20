@@ -164,7 +164,7 @@ function Driver.new(player: Player)
 	local function tap(input: any, ability: string, mouse: Vector2)
 		local function matches(event: InputObject): boolean
 			return if ability == "arrow" or ability == "melee" then event.UserInputType == Enum.UserInputType.MouseButton1
-				else event.KeyCode == (if ability == "hands" or ability == "heavy" then Enum.KeyCode.Q else if ability == "ready" then Enum.KeyCode.R else if ability == "exit" then Enum.KeyCode.B else Enum.KeyCode.E)
+				else event.KeyCode == (if ability == "hands" or ability == "heavy" then Enum.KeyCode.Q else if ability == "ready" then Enum.KeyCode.R else if ability == "exit" then Enum.KeyCode.B else if ability == "transfer" then Enum.KeyCode.F else Enum.KeyCode.E)
 		end
 		local observed = false
 		local listener = UserInputService.InputBegan:Connect(function(event) if matches(event) then observed = true end end)
@@ -172,7 +172,7 @@ function Driver.new(player: Player)
 			if ability == "arrow" or ability == "melee" then
 				input:SendMouseButton(mouse, Enum.UserInputType.MouseButton1, true); input:SendMouseButton(mouse, Enum.UserInputType.MouseButton1, false)
 			else
-				local code = if ability == "hands" or ability == "heavy" then Enum.KeyCode.Q else if ability == "ready" then Enum.KeyCode.R else if ability == "exit" then Enum.KeyCode.B else Enum.KeyCode.E
+				local code = if ability == "hands" or ability == "heavy" then Enum.KeyCode.Q else if ability == "ready" then Enum.KeyCode.R else if ability == "exit" then Enum.KeyCode.B else if ability == "transfer" then Enum.KeyCode.F else Enum.KeyCode.E
 				input:SendKey(true, code, false); input:SendKey(false, code, false)
 			end
 			waitFor(function() return observed end, 3, "Mixed ability never entered actual input stream: " .. ability)
@@ -208,7 +208,7 @@ function Driver.new(player: Player)
 	end
 	local function cast(data: any): any
 		local ability: string = data.ability
-		local key = if ability == "teleport" then "arrow" else ability
+		local key = if (ability == "teleport" or ability == "transfer") then "arrow" else ability
 		assert(remotes[key], "Unknown ability " .. ability)
 		local function perform(input: any, mouse: Vector2): any
 			local before, token, sentAt = latest[key], life(), workspace:GetServerTimeNow()
@@ -217,7 +217,7 @@ function Driver.new(player: Player)
 			assert(reply.ok == data.ok and (not data.reason or reply.reason == data.reason), ability .. " result: " .. tostring(reply.reason))
 			return { reply = reply, state = reply.state, ability = ability, sentAt = sentAt, repliedAt = item.at, inspect = inspect() }
 		end
-		if ability == "teleport" then return perform(virtual(), UserInputService:GetMouseLocation()) end
+		if ability == "teleport" or ability == "transfer" then return perform(virtual(), UserInputService:GetMouseLocation()) end
 		local point: Vector3 = data.point or root().Position + root().CFrame.LookVector * 10
 		return withView(CFrame.lookAt(point + Vector3.new(14, 16, 18), point), function(input, camera)
 			local projected, visible = camera:WorldToViewportPoint(point); assert(visible, "Mixed aim target outside viewport")
@@ -293,6 +293,9 @@ function Driver.new(player: Player)
 				if (player.Character :: Model):GetAttribute("CombatClass") ~= data then selection.run("class", data) end
 				return inspect()
 			elseif action == "cast" then return cast(data)
+            elseif action == "tap" then
+                tap(virtual(), data.ability, UserInputService:GetMouseLocation())
+                return inspect()
 			elseif action == "move" then return move(data)
 			elseif action == "ready" or action == "exit" then
 				local before = matchLatest
