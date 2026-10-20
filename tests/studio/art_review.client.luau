@@ -7,7 +7,11 @@ local player = Players.LocalPlayer
 local control = ReplicatedStorage:WaitForChild("ArtReviewControl", 20) :: RemoteEvent?
 local remote = ReplicatedStorage:WaitForChild("ArrowRemote", 20) :: RemoteEvent?
 assert(control and remote, "Art review endpoints did not initialize")
-local arrowRemote = remote :: RemoteEvent
+local ability = ReplicatedStorage:WaitForChild("ArtReviewAbility") :: StringValue
+local handsMode = ability.Value == "hands"
+local castRemote = if handsMode then ReplicatedStorage:WaitForChild("HandsRemote", 15) else remote
+assert(castRemote and castRemote:IsA("RemoteEvent"), "Art review ability remote absent")
+local arrowRemote = castRemote :: RemoteEvent
 local stopped, placed, shooter = false, false, false
 local requestId, view = 100000, 1
 local connections: { RBXScriptConnection } = {}
@@ -17,6 +21,7 @@ local views = {
 	CFrame.lookAt(Vector3.new(238, 5, -18), Vector3.new(230, 3, -8)),
 	CFrame.lookAt(Vector3.new(258, 10, -22), Vector3.new(230, 3, -22)),
 }
+if handsMode then views[2] = CFrame.lookAt(Vector3.new(242, 8, -18), Vector3.new(230, 1, -34)) end
 local gui = Instance.new("ScreenGui")
 gui.Name, gui.ResetOnSpawn, gui.DisplayOrder = "ArtReviewLabel", false, 20
 local label = Instance.new("TextLabel")
@@ -24,10 +29,10 @@ label.Size, label.Position = UDim2.new(1, -24, 0, 30), UDim2.fromOffset(12, 8)
 label.BackgroundTransparency, label.TextColor3 = 0.4, Color3.fromRGB(237, 232, 243)
 label.BackgroundColor3, label.TextSize = Color3.fromRGB(22, 18, 31), 14
 label.TextWrapped, label.Font = true, Enum.Font.GothamMedium
-label.Text = "Художественный просмотр · 1/2/3 — ракурс · автоматический выстрел"
+label.Text = "РҐСѓРґРѕР¶РµСЃС‚РІРµРЅРЅС‹Р№ РїСЂРѕСЃРјРѕС‚СЂ В· 1/2/3 вЂ” СЂР°РєСѓСЂСЃ В· Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРёР№ РІС‹СЃС‚СЂРµР»"
 label.Parent, gui.Parent = gui, player:WaitForChild("PlayerGui")
 local function hide(item: Instance)
-	if item:IsA("ScreenGui") and (item.Name == "MatchHud" or item.Name == "ArrowHud") then
+	if item:IsA("ScreenGui") and (item.Name == "MatchHud" or item.Name == "ArrowHud" or item.Name == "HandsHud") then
 		if hidden[item] == nil then hidden[item] = item.Enabled end
 		item.Enabled = false
 	end
@@ -72,10 +77,10 @@ task.spawn(function()
 			and character ~= nil and type(character:GetAttribute("CombatLife")) == "number"
 		if not ready then task.wait(0.1) end
 	until ready or stopped or os.clock() >= deadline
-	if not ready then label.Text = "Просмотр не запущен: персонаж или полный облик не загрузился."; return end
+	if not ready then label.Text = "РџСЂРѕСЃРјРѕС‚СЂ РЅРµ Р·Р°РїСѓС‰РµРЅ: РїРµСЂСЃРѕРЅР°Р¶ РёР»Рё РїРѕР»РЅС‹Р№ РѕР±Р»РёРє РЅРµ Р·Р°РіСЂСѓР·РёР»СЃСЏ."; return end
 	deadline = os.clock() + 15
 	repeat (control :: RemoteEvent):FireServer("ready"); task.wait(0.5) until placed or stopped or os.clock() >= deadline
-	if not placed then label.Text = "Просмотр не запущен: сервер не подтвердил размещение."; return end
+	if not placed then label.Text = "РџСЂРѕСЃРјРѕС‚СЂ РЅРµ Р·Р°РїСѓС‰РµРЅ: СЃРµСЂРІРµСЂ РЅРµ РїРѕРґС‚РІРµСЂРґРёР» СЂР°Р·РјРµС‰РµРЅРёРµ."; return end
 	task.wait(1)
 	while not stopped do
 		local character = player.Character
@@ -84,10 +89,12 @@ task.spawn(function()
 		if shooter and root and root:IsA("BasePart") and type(life) == "number" then
 			requestId += 1
 			local direction = Vector3.new(230, 3.5, -38) - (root.Position + Vector3.yAxis)
-			if direction.Magnitude > 0.1 then
+			if handsMode then
+                arrowRemote:FireServer({ action = "cast", requestId = requestId, life = life, position = Vector3.new(230, 0, -34) })
+            elseif direction.Magnitude > 0.1 then
 				arrowRemote:FireServer({ action = "cast", requestId = requestId, life = life, direction = direction.Unit })
 			end
 		end
-		task.wait(5)
+		task.wait(if handsMode then 10 else 5)
 	end
 end)

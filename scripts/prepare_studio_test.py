@@ -8,6 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 token = "warlock-test-" + uuid.uuid4().hex
 multiplayer = "--multiplayer" in sys.argv
 match = "--match" in sys.argv
+hands = "--hands" in sys.argv
 clients = int(sys.argv[sys.argv.index("--clients") + 1]) if "--clients" in sys.argv else 2
 assert clients in (2, 6)
 lag_ms = int(sys.argv[sys.argv.index("--lag-ms") + 1]) if "--lag-ms" in sys.argv else 0
@@ -17,7 +18,7 @@ project["tree"]["ReplicatedStorage"]["StudioTestToken"] = {
 }
 project["tree"]["ServerStorage"] = {"StudioWorldTests": {"$path": str(ROOT / "tests/studio/world.luau")}}
 project["tree"]["ServerStorage"]["MatchWorldTests"] = {"$path": str(ROOT / "tests/studio/match_world.luau")}
-if not match:
+if not (match or hands):
     # Preserve the original arrow fixture and expectations as the main place grows.
     project["tree"]["ServerScriptService"]["Game"] = {
         name: {"$path": str(ROOT / "src/server" / name)}
@@ -37,6 +38,11 @@ elif multiplayer:
     project["tree"]["ReplicatedStorage"]["SliceTestControl"] = {"$className": "RemoteEvent"}
     project["tree"]["ServerScriptService"]["MultiplayerTest"] = {"$path": str(ROOT / "tests/studio/multiplayer.server.luau")}
     project["tree"]["StarterPlayer"]["StarterPlayerScripts"]["MultiplayerTest"] = {"$path": str(ROOT / "tests/studio/multiplayer.client.luau")}
+if hands:
+    project["tree"]["ServerStorage"]["$attributes"] = {"MatchTest": True, "HandsTest": True}
+    project["tree"]["ReplicatedStorage"]["HandsTestControl"] = {"$className": "RemoteEvent"}
+    project["tree"]["ServerScriptService"]["HandsTest"] = {"$path": str(ROOT / "tests/studio/hands.server.luau")}
+    project["tree"]["StarterPlayer"]["StarterPlayerScripts"]["HandsTest"] = {"$path": str(ROOT / "tests/studio/hands.client.luau")}
 # This project lives in build/, so resolve source paths before writing it.
 def absolute_paths(value):
     if isinstance(value, dict):
@@ -47,7 +53,7 @@ def absolute_paths(value):
                 absolute_paths(item)
 absolute_paths(project)
 (ROOT / "build/studio-test.project.json").write_text(json.dumps(project), encoding="utf-8")
-runtime_test = multiplayer or match
+runtime_test = multiplayer or match or hands
 test_expression = f'game:GetService("StudioTestService"):ExecuteMultiplayerTestAsync({clients}, {{ lagMs = {lag_ms}, clients = {clients} }})' if runtime_test else '(function() assert(require(game:GetService("ServerStorage"):WaitForChild("StudioWorldTests", 10))); return require(game:GetService("ServerStorage"):WaitForChild("MatchWorldTests", 10)) end)()'
 plugin = f'''--!strict
 task.defer(function()
