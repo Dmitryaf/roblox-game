@@ -86,7 +86,16 @@ local function phaseMove(actions: { any }, label: string)
     local data = together(actions)
     for index, result in data do
         print("ArenaApproach", label, actions[index].player.UserId, "distance", result.distance, "rewinds", result.rewinds,
-            "corrections", result.corrections, "speed16", result.stableSpeedSegments["16"].speed)
+            "corrections", result.corrections, "speed16", result.stableSpeedSegments["16"].speed, "nearestBody", result.minOtherRootGap)
+        for _, trace in result.rewindTrace do
+            print("ArenaRewind", label, actions[index].player.UserId, "at", trace.at, "dt", trace.dt,
+                "progress", trace.progress, "previous", trace.previous, "current", trace.current, "velocity", trace.velocity,
+                "corrections", trace.correctionsBefore, trace.correctionsAfter,
+                "other", if trace.other then trace.other.owner else nil, "gap", if trace.other then trace.other.gap else nil,
+                "otherPosition", if trace.other then trace.other.position else nil)
+        end
+    end
+    for index, result in data do
         assert(result.corrections == 0 and result.rewinds == 0, "Real approach introduced a movement correction or velocity rewind")
         assert(result.samples > 10 and result.distance > 10, "Approach did not exercise real W movement")
         local segment = result.stableSpeedSegments["16"]
@@ -149,15 +158,31 @@ local ok, problem = xpcall(function()
         assert(classes.warrior and classes.warlock and (classes.warrior == 2 or classes.warlock == 2), "Both teams must include both classes and a repeated class")
         table.sort(team, function(a, b) return root(a).Position.X < root(b).Position.X end)
     end
+    -- Walking-speed assertions require a clear route. The old 30/33/36 endpoints
+    -- compressed teammates into real body contacts (observed root gap < 2).
+    -- Clear the leading pair first so delayed replicas at the pad cannot obstruct
+    -- the followers. Every displacement still comes from actual W input.
+    local flank = { 28, 56, 76 }
+    for index = 3, 1, -1 do
+        local wave = {}
+        for _, team in teams do
+            local player = team[index]
+            table.insert(wave, { player = player, action = "move", data = {
+                direction = Vector3.xAxis, duration = (flank[index] - root(player).Position.X) / 16 } })
+        end
+        phaseMove(wave, "leave-pad-" .. index)
+    end
     local moves = {}
-    for _, team in teams do for index, player in team do
-        local distance = 30 + (index - 1) * 3 - root(player).Position.X
-        table.insert(moves, { player = player, action = "move", data = { direction = Vector3.xAxis, duration = distance / 16 } })
-    end end
-    phaseMove(moves, "leave-pad")
-    moves = {}
     for _, player in players do
-        local p = root(player).Position; assert(p.X > 27 and p.X < 39, "Real movement failed to reach the clear screen flank")
+        -- The input report and final physics packet use different replication
+        -- paths. Observe the same endpoint on the server before turning the lane.
+        local received = root(player).Position
+        waitFor(function()
+            for _, x in flank do if math.abs(root(player).Position.X - x) < 2 then return true end end
+            return false
+        end, 2, "Real movement failed to replicate its clear screen flank from " .. tostring(received))
+        local p = root(player).Position
+        print("ArenaFlankReplicated", player.UserId, "atReport", received, "settled", p)
         local warrior = (player.Character :: Model):GetAttribute("CombatClass") == "warrior"
         local sign = if snapshot(player).team == 1 then 1 else -1
         local distance = math.abs(p.Z) - 8
@@ -166,8 +191,8 @@ local ok, problem = xpcall(function()
     end
     phaseMove(moves, "around-screen")
     moves = {}
-    for teamIndex, team in teams do for index, player in team do
-        local targetX = if teamIndex == 1 then -10 + (index - 1) * 6 else 10 - (index - 1) * 6
+    for _, team in teams do for index, player in team do
+        local targetX = -12 + (index - 1) * 12
         table.insert(moves, { player = player, action = "move", data = { direction = -Vector3.xAxis, duration = (root(player).Position.X - targetX) / 16 } })
     end end
     phaseMove(moves, "enter-objective")
@@ -195,6 +220,31 @@ local ok, problem = xpcall(function()
         4, "Real Q from the natural approach did not damage its live opponent before fixture placement")
     print("ArenaNaturalFirstDamage", "startToDamage", (firstDamageAt :: number) - (activeAt :: number),
         "source", approachCaster.UserId, "target", approachTarget.UserId, "gap", closest, "fixturePlacesBeforeDamage", 0)
+    local retreatLife = life(approachTarget)
+    local retreatArea = owned(combat(approachCaster).hands, approachCaster)
+    assert(retreatArea and retreatArea.kind == "active", "Retreat requires an actually active source")
+    local retreatSign = if root(approachTarget).Position.Z >= 0 then 1 else -1
+    -- Leave enough real walking after the replicated slow clears to measure the
+    -- unchanged >0.4-second free-speed segment before the source's original TTL.
+    local retreat = command(approachTarget, "move", { direction = Vector3.zAxis * retreatSign, duration = 2.2 })
+    assert(life(approachTarget) == retreatLife and retreat.corrections == 0 and retreat.rewinds == 0,
+        "Actual retreat from the opening hands area changed life or rewound movement")
+    print("ArenaRetreatTrace", approachTarget.UserId, "start", retreat.start, "finish", retreat.finish,
+        "slowTime", retreat.stableSpeedSegments["10.4"].time, "slowSpeed", retreat.stableSpeedSegments["10.4"].speed,
+        "freeTime", retreat.stableSpeedSegments["16"].time, "freeSpeed", retreat.stableSpeedSegments["16"].speed,
+        "serverSpeed", human(approachTarget).WalkSpeed)
+    assert(retreat.stableSpeedSegments["10.4"].time > 0.2 and retreat.stableSpeedSegments["16"].time > 0.4
+        and retreat.stableSpeedSegments["10.4"].speed > 9 and retreat.stableSpeedSegments["10.4"].speed < 12
+        and retreat.stableSpeedSegments["16"].speed > 13.5 and retreat.stableSpeedSegments["16"].speed < 18.5,
+        "Real retreat did not transition from hands slow to native free movement")
+    waitFor(function() return human(approachTarget).WalkSpeed == 16 end, 2, "Leaving hands retained its slow")
+    assert(now() < retreatArea.expiresAt and owned(combat(approachCaster).hands, approachCaster) ~= nil,
+        "Retreat recovery was only observed after the hands area expired")
+    assert(((root(approachTarget).Position - retreatArea.position) * Vector3.new(1, 0, 1)).Magnitude > 8,
+        "Retreat did not leave the actual active area")
+    print("ArenaNaturalRetreat", approachTarget.UserId, "distance", retreat.distance,
+        "slowSeconds", retreat.stableSpeedSegments["10.4"].time, "freeSpeed", retreat.stableSpeedSegments["16"].speed,
+        "corrections", retreat.corrections, "rewinds", retreat.rewinds)
 
     -- Reproducible close combat starts after the real, measured route above.
     outside()
@@ -216,6 +266,9 @@ local ok, problem = xpcall(function()
     -- damage baselines only after its original duration and cooldown have elapsed.
     for _, pair in pairs do pair.warriorBefore, pair.warlockBefore = losses[pair.warrior], losses[pair.warlock] end
     local actions: { any } = {}
+    for _, player in players do table.insert(actions, { player = player, action = "inspect" }) end
+    local loadBefore = together(actions)
+    actions = {}
     for _, pair in pairs do
         table.insert(actions, { player = pair.warlock, action = "cast", data = { ability = "hands", point = root(pair.warrior).Position - Vector3.yAxis * 3, ok = true } })
         table.insert(actions, { player = pair.warrior, action = "cast", data = { ability = "heavy", point = root(pair.warlock).Position, ok = true } })
@@ -250,8 +303,34 @@ local ok, problem = xpcall(function()
         assert(data.physicsViolations == 0 and data.contacts.heavy >= 3 and data.contacts.melee >= 3, "Observer omitted confirmed contacts or ability VFX entered physics")
         for _, key in { "hands", "heavy", "arrow", "melee", "dash" } do assert(data.visuals[key].seen > 0, "Six-player observer never saw " .. key) end
         print("ArenaObserver", players[index].UserId, "heavy", data.contacts.heavy, "melee", data.contacts.melee, "physics", data.physicsViolations)
+        local elapsed = data.sampledAt - loadBefore[index].sampledAt
+        print("ArenaObservedLoad", players[index].UserId, "seconds", elapsed,
+            "renderHz", (data.renderFrames - loadBefore[index].renderFrames) / elapsed,
+            "heartbeatHz", (data.heartbeatFrames - loadBefore[index].heartbeatFrames) / elapsed,
+            "handsPeak", data.visuals.hands.peak, "heavyPeak", data.visuals.heavy.peak,
+            "arrowPeak", data.visuals.arrow.peak, "meleePeak", data.visuals.melee.peak)
     end
     waitFor(function() return #combat(players[1]).hands.active == 0 end, 5, "Concurrent hands sources failed to expire")
+    outside()
+    local coverCaster, coverTarget = warlocks[1], pairs[1].warrior
+    for _, warrior in warriors do if snapshot(warrior).team ~= snapshot(coverCaster).team then coverTarget = warrior; break end end
+    waitFor(function() return now() > combat(coverCaster).arrow.readyAt + 0.1 end, 4, "Cover arrow cooldown did not elapse")
+    place(coverCaster, Vector3.new(35, 3, 50)); place(coverTarget, Vector3.new(53, 3, 50))
+    local coverHealth = human(coverTarget).Health
+    local coverLosses = losses[coverTarget]
+    local coverOrigin, coverEnd = root(coverCaster).Position + Vector3.yAxis, root(coverTarget).Position
+    local query = RaycastParams.new()
+    query.FilterType, query.FilterDescendantsInstances = Enum.RaycastFilterType.Exclude, { coverCaster.Character :: Model }
+    local obstruction = workspace:Raycast(coverOrigin, coverEnd - coverOrigin, query)
+    assert(obstruction and obstruction.Instance:GetAttribute("MainCover") == true, "Cover probe did not cross real arena cover")
+    command(coverCaster, "cast", { ability = "arrow", point = coverEnd, ok = true })
+    waitFor(function() return owned(combat(coverCaster).arrow, coverCaster) == nil end, 3, "Arrow did not resolve against cover")
+    -- Default Roblox regeneration may increase Health during this observation.
+    -- Cumulative negative HealthChanged deltas also detect damage masked by healing.
+    local coveredDamage = losses[coverTarget] - coverLosses
+    print("ArenaCover", "caster", coverCaster.UserId, "target", coverTarget.UserId, "obstruction", obstruction.Instance:GetFullName(),
+        "damage", coveredDamage, "healthBefore", coverHealth, "healthAfter", human(coverTarget).Health)
+    assert(coveredDamage == 0, "A real arrow damaged its opponent through arena cover")
     outside()
     local a, b = teams[1][1], teams[2][1]
     place(a, Vector3.new(-4, 3, 0)); place(b, Vector3.new(4, 3, 0))
@@ -288,7 +367,14 @@ local ok, problem = xpcall(function()
     task.wait(0.35); local frozen = snapshot(remaining)
     assert(frozen.frozen and frozen.scoreA == paused.scoreA and frozen.scoreB == paused.scoreB and math.abs(frozen.remaining - paused.remaining) < 0.05)
     command(quitter, "ready"); waitActive(6)
-    for _, player in players do assert(life(player) > lives[player] and snapshot(player).matchId == matchId and human(player).Health == 100) end
+    for _, player in players do
+        -- watch() raises this fixture's MaxHealth to 1000 to survive the damage
+        -- sequence. Production resetContext refills MaxHealth, not a hardcoded 100.
+        assert(life(player) > lives[player] and snapshot(player).matchId == matchId
+            and human(player).Health == human(player).MaxHealth, "Replacement did not reset a participant's life and full health")
+        print("ArenaFreshLife", player.UserId, "before", lives[player], "after", life(player),
+            "health", human(player).Health, "maxHealth", human(player).MaxHealth)
+    end
     command(quitter, "exit")
     waitFor(function() return snapshot(remaining).phase == "finished" end, 6, "Missing replacement did not end the interrupted round")
     assert(snapshot(remaining).result.reason == "interrupted" and snapshot(remaining).result.winner == nil)

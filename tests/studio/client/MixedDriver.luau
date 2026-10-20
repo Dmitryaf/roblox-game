@@ -154,7 +154,7 @@ function Driver.new(player: Player)
 	local function inspect(): any
 		assert(not failure, failure); scan()
 		local damage = damageByLife[life()] or { damage = 0, events = 0 }
-		return { position = root().Position, health = human().Health, speed = human().WalkSpeed, life = life(), classId = (player.Character :: Model):GetAttribute("CombatClass"),
+		return { sampledAt = workspace:GetServerTimeNow(), position = root().Position, health = human().Health, speed = human().WalkSpeed, life = life(), classId = (player.Character :: Model):GetAttribute("CombatClass"),
 			team = (player.Character :: Model):GetAttribute("MatchTeam"), corrections = corrections(), states = states, matchState = matchState,
 			visuals = visuals, events = events, contacts = contacts, ownContacts = ownContacts, physicsViolations = physicsViolations, firstPhysicsViolation = firstPhysics,
 			cumulativeDamage = cumulativeDamage, cumulativeDamageLife = damage.damage, damageEvents = damageEvents, lifeDamageEvents = damage.events,
@@ -233,13 +233,36 @@ function Driver.new(player: Player)
 		return withView(frame, function(input, camera)
 			local before, began, start = corrections(), os.clock(), body.Position
 			local previous, previousAt, speed, stableSince, lastDash = start, began, humanoid.WalkSpeed, began, began
-			local metrics: any = { start = start, samples = 0, rewinds = 0, backward = 0, maxStep = 0, stableSpeedSegments = {} }
+			local previousVelocity, previousCorrections = body.AssemblyLinearVelocity, before
+			local metrics: any = { start = start, samples = 0, rewinds = 0, backward = 0, maxStep = 0, stableSpeedSegments = {},
+				rewindTrace = {}, correctionsBefore = before }
 			for _, value in { "10.4", "9.6", "16" } do metrics.stableSpeedSegments[value] = { distance = 0, time = 0, samples = 0, speed = 0 } end
 			local sample = RunService.Heartbeat:Connect(function()
 				local at, point = os.clock(), body.Position
 				local dt, progress = at - previousAt, (point - previous):Dot(axis)
+				local velocity, currentCorrections = body.AssemblyLinearVelocity, corrections()
+				local nearest: any = nil
+				for _, other in Players:GetPlayers() do
+					local character = other.Character
+					if other == player or not character or not character.Parent then continue end
+					local otherRoot = character:FindFirstChild("HumanoidRootPart")
+					if not otherRoot or not otherRoot:IsA("BasePart") then continue end
+					local gap = (otherRoot.Position - point).Magnitude
+					if not nearest or gap < nearest.gap then
+						nearest = { owner = other.UserId, name = other.Name, character = character:GetFullName(),
+							root = otherRoot.Name, position = otherRoot.Position, gap = gap }
+					end
+				end
+				if nearest then metrics.minOtherRootGap = math.min(metrics.minOtherRootGap or math.huge, nearest.gap) end
 				metrics.samples += 1; metrics.maxStep = math.max(metrics.maxStep, progress)
-				if progress < -0.1 then metrics.rewinds += 1 end
+				if progress < -0.1 then
+					metrics.rewinds += 1
+					if #metrics.rewindTrace < 4 then
+						table.insert(metrics.rewindTrace, { at = workspace:GetServerTimeNow(), dt = dt, progress = progress,
+							previous = previous, current = point, previousVelocity = previousVelocity, velocity = velocity,
+							correctionsBefore = previousCorrections, correctionsAfter = currentCorrections, other = nearest })
+					end
+				end
 				if progress < 0 then metrics.backward += -progress end
 				local mover = body:FindFirstChild("WarriorDashVelocity")
 				local dashing = mover ~= nil and mover:IsA("LinearVelocity") and mover.Enabled
@@ -254,6 +277,7 @@ function Driver.new(player: Player)
 					end
 				end
 				previous, previousAt = point, at
+				previousVelocity, previousCorrections = velocity, currentCorrections
 			end)
 			local ok, problem = xpcall(function()
 				input:SendKey(true, Enum.KeyCode.W, false)
@@ -270,6 +294,7 @@ function Driver.new(player: Player)
 			end, debug.traceback)
 			input:SendKey(false, Enum.KeyCode.W, false); sample:Disconnect(); assert(ok, tostring(problem))
 			metrics.finish, metrics.duration, metrics.corrections = body.Position, os.clock() - began, corrections() - before
+			metrics.correctionsAfter = corrections()
 			metrics.distance = (body.Position - start):Dot(axis)
 			metrics.lateral = ((body.Position - start) - axis * metrics.distance) * Vector3.new(1, 0, 1); metrics.lateral = metrics.lateral.Magnitude
 			for _, segment in metrics.stableSpeedSegments do if segment.time > 0 then segment.speed = segment.distance / segment.time end end
