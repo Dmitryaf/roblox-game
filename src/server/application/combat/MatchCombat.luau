@@ -9,7 +9,12 @@ function MatchCombat.new(combat: any, matches: any, tick: () -> (), attackReason
 		return attackReason(owner)
 	end
 	return {
-		snapshot = combat.snapshot, handsSnapshot = combat.handsSnapshot,
+		snapshot = combat.snapshot, handsSnapshot = combat.handsSnapshot, meleeSnapshot = combat.meleeSnapshot,
+        swing = function(owner: number, life: number, direction: Vector3, now: number): (boolean, string?)
+            local reason = allowed(owner, life)
+            if reason then return false, reason end
+            return combat.swing(owner, life, direction, now)
+        end,
         castHands = function(owner: number, life: number, position: Vector3, now: number): (boolean, string?)
             local reason = allowed(owner, life)
             if reason then return false, reason end

@@ -7,6 +7,13 @@ local HandsConfig = require(script.Parent.config.Hands)
 local HandsService = require(script.Parent.application.combat.HandsService)
 local WarlockCombat = require(script.Parent.application.combat.WarlockCombat)
 local HandsGateway = require(script.Parent.adapters.networking.HandsGateway)
+local ClassService = require(script.Parent.application.lobby.ClassService)
+local ClassCombat = require(script.Parent.application.combat.ClassCombat)
+local ClassGateway = require(script.Parent.adapters.networking.ClassGateway)
+local MeleeGateway = require(script.Parent.adapters.networking.MeleeGateway)
+local MeleeService = require(script.Parent.application.combat.MeleeService)
+local SwordWorld = require(script.Parent.adapters.world.SwordWorld)
+local WarriorConfig = require(script.Parent.config.Warrior)
 local MatchConfig = require(script.Parent.config.Match)
 local Arena = require(script.Parent.adapters.world.MatchArena)
 local World = require(script.Parent.adapters.world.MatchWorld)
@@ -29,10 +36,21 @@ local function remote(name: string): RemoteEvent
     return event
 end
 local arrowRemote, matchRemote, handsRemote = remote("ArrowRemote"), remote("MatchRemote"), remote("HandsRemote")
+local classRemote, meleeRemote = remote("ClassRemote"), remote("MeleeRemote")
 local now = function() return workspace:GetServerTimeNow() end
 local matches: any
 local world = World.new(arena, function(owner) return matches.context(owner) end,
     function(owner) return matches.canAct(owner) end)
+local combat: any
+local runtime: any
+local classes = ClassService.new({
+    life = function(owner) return combat.snapshot(owner).life end, alive = world.alive,
+    locked = function(owner)
+        local state = matches.snapshot(owner, now())
+        return state.mode ~= "training" or state.ready or state.frozen
+    end,
+    changed = function(owner) runtime.reset(owner, nil, false) end,
+})
 local arrow = ArrowService.new({
     origin = world.origin, alive = world.alive, sweep = world.sweep,
     damage = world.damage, landing = world.landing, move = world.move,
@@ -40,17 +58,22 @@ local arrow = ArrowService.new({
 }, Config)
 local hands = HandsService.new({ alive = world.alive, placement = world.placement, targets = world.areaTargets,
     damage = world.damage, slow = world.slow, emit = function(event) handsRemote:FireAllClients(event) end }, HandsConfig)
-local combat = WarlockCombat.new(arrow, hands)
-local runtime = Runtime.new(combat, world, arena, now, Config.respawn)
+local sword = SwordWorld.new(world)
+local melee = MeleeService.new({ alive = world.alive, origin = world.origin, face = world.face,
+    targets = sword.targets, damage = world.damage, emit = function(event) meleeRemote:FireAllClients(event) end }, WarriorConfig)
+combat = ClassCombat.new(WarlockCombat.new(arrow, hands), melee, classes.get)
+runtime = Runtime.new(combat, world, arena, now, Config.respawn, classes)
 matches = MatchService.new({ reset = runtime.reset, freeze = runtime.freeze }, Fixture.config(MatchConfig))
 local guarded = MatchCombat.new(combat, matches, runtime.tick, world.attackReason)
 local arrowGateway = ArrowGateway.new(arrowRemote, guarded, now)
 local matchGateway = MatchGateway.new(matchRemote, matches, now, runtime.tick, world.alive)
 local handsGateway = HandsGateway.new(handsRemote, { cast = guarded.castHands, snapshot = guarded.handsSnapshot }, now)
-runtime.start(matches, arrowGateway, matchGateway, handsGateway)
+local classGateway = ClassGateway.new(classRemote, classes, now)
+local meleeGateway = MeleeGateway.new(meleeRemote, { cast = guarded.swing, snapshot = guarded.meleeSnapshot }, now)
+runtime.start(matches, arrowGateway, matchGateway, handsGateway, classGateway, meleeGateway)
 local stopFixture = Fixture.attach(matches, world, now)
 game:BindToClose(function()
     runtime.destroy()
     stopFixture()
-    arrowRemote:Destroy(); matchRemote:Destroy(); handsRemote:Destroy(); arena.folder:Destroy()
+    arrowRemote:Destroy(); matchRemote:Destroy(); handsRemote:Destroy(); classRemote:Destroy(); meleeRemote:Destroy(); arena.folder:Destroy()
 end)

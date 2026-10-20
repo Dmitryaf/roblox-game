@@ -2,7 +2,7 @@
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local MatchRuntime = {}
-function MatchRuntime.new(combat: any, world: any, arena: any, now: () -> number, respawn: number)
+function MatchRuntime.new(combat: any, world: any, arena: any, now: () -> number, respawn: number, classes: any?)
 	local connections: { RBXScriptConnection } = {}
 	local owned: { [number]: { RBXScriptConnection } } = {}
 	local deaths: { [number]: RBXScriptConnection } = {}
@@ -14,6 +14,8 @@ function MatchRuntime.new(combat: any, world: any, arena: any, now: () -> number
 	local arrowGateway: any
 	local matchGateway: any
     local handsGateway: any
+    local classGateway: any
+    local meleeGateway: any
 	local lifeSequence, lastPublish = 0, 0
 	local stopped = false
 	local runtime = {}
@@ -21,6 +23,8 @@ function MatchRuntime.new(combat: any, world: any, arena: any, now: () -> number
 		local player = players[owner]
 		if player and arrowGateway then arrowGateway.sync(player) end
         if player and handsGateway then handsGateway.sync(player) end
+        if player and classGateway then classGateway.sync(player) end
+        if player and meleeGateway then meleeGateway.sync(player) end
 	end
 	local function load(owner: number)
 		local player = players[owner]
@@ -47,6 +51,7 @@ function MatchRuntime.new(combat: any, world: any, arena: any, now: () -> number
 		local character = characters[owner]
 		if character then
 			character:SetAttribute("CombatLife", lifeSequence)
+            character:SetAttribute("CombatClass", if classes then classes.get(owner) else "warlock")
 			character:SetAttribute("MatchTeam", team)
 			local previous = character:FindFirstChild("MatchTeamLabel")
 			if previous then previous:Destroy() end
@@ -115,6 +120,7 @@ function MatchRuntime.new(combat: any, world: any, arena: any, now: () -> number
 		local owner = player.UserId
 		if players[owner] then return end
 		players[owner] = player
+        if classes then classes.join(owner) end
 		matches.join(owner, now())
 		owned[owner] = {
 			player.CharacterAdded:Connect(function(character) addCharacter(player, character) end),
@@ -139,6 +145,9 @@ function MatchRuntime.new(combat: any, world: any, arena: any, now: () -> number
 		owned[owner] = nil
 		arrowGateway.forget(owner); matchGateway.forget(owner)
         if handsGateway then handsGateway.forget(owner) end
+        if classGateway then classGateway.forget(owner) end
+        if meleeGateway then meleeGateway.forget(owner) end
+        if classes then classes.leave(owner) end
 	end
 	function runtime.tick()
 		if stopped then return end
@@ -146,17 +155,23 @@ function MatchRuntime.new(combat: any, world: any, arena: any, now: () -> number
         combat.step(now()) -- Resolve deaths before sampling objective occupants.
 		matches.step(now(), world.onZone())
 	end
-	function runtime.start(matchService: any, arrow: any, match: any, hands: any?)
+	function runtime.start(matchService: any, arrow: any, match: any, hands: any?, selection: any?, melee: any?)
 		matches, arrowGateway, matchGateway, handsGateway = matchService, arrow, match, hands
+        classGateway, meleeGateway = selection, melee
 		arrowGateway.start(); matchGateway.start()
         if handsGateway then handsGateway.start() end
+        if classGateway then classGateway.start() end
+        if meleeGateway then meleeGateway.start() end
 		table.insert(connections, Players.PlayerAdded:Connect(addPlayer))
 		table.insert(connections, Players.PlayerRemoving:Connect(removePlayer))
 		table.insert(connections, RunService.Heartbeat:Connect(function()
 			runtime.tick()
 			if now() - lastPublish >= 0.2 then
 				lastPublish = now()
-				for _, player in players do matchGateway.sync(player) end
+				for _, player in players do
+                    matchGateway.sync(player)
+                    if classGateway then classGateway.sync(player) end
+                end
 			end
 		end))
 		for _, player in Players:GetPlayers() do addPlayer(player) end
@@ -169,6 +184,9 @@ function MatchRuntime.new(combat: any, world: any, arena: any, now: () -> number
 		matches.destroy(); combat.destroy()
 		arrowGateway.destroy(); matchGateway.destroy()
         if handsGateway then handsGateway.destroy() end
+        if classGateway then classGateway.destroy() end
+        if meleeGateway then meleeGateway.destroy() end
+        if classes then classes.destroy() end
 	end
 	return runtime
 end
