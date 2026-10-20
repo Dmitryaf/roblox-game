@@ -117,7 +117,13 @@ if feedback_baseline:
     for name in ["MeleeEffects", "ArrowEffects", "DashEffects"]:
         path = shadow / "presentation" / (name + ".luau")
         source = path.read_text(encoding="utf-8")
-        source, count = re.subn(r"(function effects\.preview\([^\n]+\n).*?(\n    end)", r"\1        return false\2", source, flags=re.S)
+        source, count = re.subn(
+            r"^([ \t]*)(function effects\.preview\([^\n]+\n).*?^\1end\b",
+            # A no-op presentation must preserve the accepted-input path. Dash
+            # treats false as a local action conflict and would never send E.
+            lambda match: match[1] + match[2] + match[1] + "    return true\n" + match[1] + "end",
+            source, flags=re.S | re.M,
+        )
         assert count == 1, "Expected exactly one explicit preview hook in " + name
         path.write_text(source, encoding="utf-8")
     project["tree"]["StarterPlayer"]["StarterPlayerScripts"]["Game"] = {"$path": str(shadow)}

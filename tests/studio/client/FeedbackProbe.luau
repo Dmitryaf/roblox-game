@@ -35,6 +35,13 @@ function Probe.new(player: Player, options: any?): any
 	local humanoid: Humanoid? = nil
 	local joints: { any } = {}
 	local previousJoints: { [Instance]: CFrame } = {}
+	local previousJointAt: { [Instance]: number } = {}
+	local jointHistory: { [Instance]: { any } } = {}
+	local historyLife: any = nil
+	local historyClass: any = nil
+	local lastInputAt = -math.huge
+	-- A 15 Hz background renderer needs a full second to supply >=10 actual frames.
+	local HISTORY_SECONDS, HISTORY_CAPACITY = 1, 300
 	local lastPoint: Vector3? = nil
 	local lastVelocity = Vector3.zero
 	local lastAt = os.clock()
@@ -57,6 +64,47 @@ function Probe.new(player: Player, options: any?): any
 		return event
 	end
 	local function transform(joint: any): CFrame? local ok, value = pcall(function() return joint.Transform end); return if ok then value else nil end
+	local function resetHistory()
+		table.clear(jointHistory)
+		historyLife = if character then character:GetAttribute("CombatLife") else nil
+		historyClass = if character then character:GetAttribute("CombatClass") else nil
+	end
+	local function currentHistory(joint: Instance, at: number): { any }
+		local history = jointHistory[joint] or {}
+		while #history > 0 and history[1].at < at - HISTORY_SECONDS do table.remove(history, 1) end
+		jointHistory[joint] = history
+		return history
+	end
+	local function envelope(joint: Instance, baseline: CFrame, at: number): any
+		local history = currentHistory(joint, at)
+		local angle, translation = 0, 0
+		for _, sample in history do
+			local delta = baseline:ToObjectSpace(sample.value)
+			local _, rotation = delta:ToAxisAngle()
+			angle, translation = math.max(angle, math.abs(rotation)), math.max(translation, delta.Position.Magnitude)
+		end
+		return { joint = joint.Name, samples = #history,
+			span = if #history > 1 then history[#history].at - history[1].at else 0,
+			sampleAge = if #history > 0 then at - history[#history].at else nil,
+			angleEnvelope = angle, translationEnvelope = translation,
+			angleThreshold = angle + 0.035, translationThreshold = translation + 0.025 }
+	end
+	local function calibration(): any
+		local at, count, minimumSpan, minimumSamples, maximumAge = os.clock(), 0, math.huge, math.huge, 0
+		for _, joint in joints do
+			if not joint.Parent then continue end
+			local history = currentHistory(joint, at)
+			count += 1
+			minimumSamples = math.min(minimumSamples, #history)
+			minimumSpan = math.min(minimumSpan, if #history > 1 then history[#history].at - history[1].at else 0)
+			maximumAge = math.max(maximumAge, if #history > 0 then at - history[#history].at else math.huge)
+		end
+		if count == 0 then minimumSpan, minimumSamples = 0, 0 end
+		return { ready = count > 0 and minimumSpan >= 0.5 and minimumSamples >= 10 and maximumAge <= 0.15 and at - lastInputAt > 1.6,
+			joints = count, minimumSpan = minimumSpan, minimumSamples = minimumSamples,
+			maximumSampleAge = if maximumAge < math.huge then maximumAge else nil,
+			historySeconds = HISTORY_SECONDS, excludesInputSeconds = 1.6 }
+	end
 	local function watchMover(child: Instance)
 		if watched[child] or not child:IsA("LinearVelocity") or child.Name ~= "WarriorDashVelocity" then return end
 		watched[child] = true
@@ -69,8 +117,9 @@ function Probe.new(player: Player, options: any?): any
 	end
 	local function bind(value: Model)
 		for _, connection in bodyConnections do connection:Disconnect() end
-		table.clear(bodyConnections); table.clear(watched); table.clear(previousJoints); table.clear(joints)
+		table.clear(bodyConnections); table.clear(watched); table.clear(previousJoints); table.clear(previousJointAt); table.clear(joints)
 		character, root, humanoid = value, nil, nil
+		resetHistory()
 		lastPoint, lastVelocity, lastAt, idleJointStep = nil, Vector3.zero, os.clock(), 0
 		local function discover()
 			local nextRoot = value:FindFirstChild("HumanoidRootPart")
@@ -91,7 +140,10 @@ function Probe.new(player: Player, options: any?): any
 		table.insert(bodyConnections, value.DescendantAdded:Connect(jointAdded))
 		table.insert(bodyConnections, value.ChildAdded:Connect(discover))
 		for _, attribute in { "CombatLife", "CombatClass", "CombatMovementCorrections" } do
-			table.insert(bodyConnections, value:GetAttributeChangedSignal(attribute):Connect(function() mark("attribute", { name = attribute, value = value:GetAttribute(attribute) }) end))
+			table.insert(bodyConnections, value:GetAttributeChangedSignal(attribute):Connect(function()
+				if attribute ~= "CombatMovementCorrections" then resetHistory() end
+				mark("attribute", { name = attribute, value = value:GetAttribute(attribute) })
+			end))
 		end
 		discover(); mark("character_bound")
 	end
@@ -106,11 +158,46 @@ function Probe.new(player: Player, options: any?): any
 		inputSerial += 1
 		local focused: any = UserInputService:GetFocusedTextBox()
 		local event = mark("input", { inputId = inputSerial, code = code, processed = processed, focused = focused ~= nil })
-		local baseline = {}; for _, joint in joints do if joint.Parent then baseline[joint] = transform(joint) end end
+		if character and (historyLife ~= character:GetAttribute("CombatLife") or historyClass ~= character:GetAttribute("CombatClass")) then resetHistory() end
+		local baseline, envelopes, reportEnvelopes = {}, {}, {}
+		local historySpan, historySamples, minimumSpan, minimumSamples, maximumAge = 0, 0, math.huge, math.huge, 0
+		local quietBeforeInput = event.localAt - lastInputAt > 1.6
+		local renderedBaselines, rawBaselines, rawDifference = 0, 0, 0
+		for _, joint in joints do
+			if not joint.Parent then continue end
+			local current = transform(joint)
+			if not current then continue end
+			-- Input can arrive between the coordinator's restore and apply phases.
+			-- Compare two presented poses, not an uncomposed raw Transform to a render.
+			local rendered = previousJoints[joint]
+			local inputBase = rendered or current
+			baseline[joint] = inputBase
+			local observed = envelope(joint, inputBase, event.localAt)
+			observed.baselineSource = if rendered then "last_rendered" else "raw_fallback"
+			observed.baselineAge = if previousJointAt[joint] then event.localAt - previousJointAt[joint] else 0
+			local rawDelta = inputBase:ToObjectSpace(current)
+			local _, rawAngle = rawDelta:ToAxisAngle()
+			observed.rawToRenderedAngle, observed.rawToRenderedTranslation = math.abs(rawAngle), rawDelta.Position.Magnitude
+			rawDifference = math.max(rawDifference, math.abs(rawAngle))
+			if rendered then renderedBaselines += 1 else rawBaselines += 1 end
+			envelopes[joint] = observed; table.insert(reportEnvelopes, observed)
+			historySpan, historySamples = math.max(historySpan, observed.span), math.max(historySamples, observed.samples)
+			minimumSpan, minimumSamples = math.min(minimumSpan, observed.span), math.min(minimumSamples, observed.samples)
+			maximumAge = math.max(maximumAge, observed.sampleAge or math.huge)
+		end
+		if #reportEnvelopes == 0 then minimumSpan, minimumSamples = 0, 0 end
+		lastInputAt = event.localAt
 		local flat = if root then root.AssemblyLinearVelocity * Vector3.new(1, 0, 1) else Vector3.zero
 		table.insert(windows, { inputId = inputSerial, code = code, processed = processed, focused = focused ~= nil, at = event.at, localAt = event.localAt,
 			life = event.snapshot.life, baselineSpeed = flat.Magnitude, baselineJointStep = idleJointStep,
-			jointThreshold = math.max(0.035, idleJointStep * 3), baseline = baseline })
+			jointThreshold = math.max(0.035, idleJointStep * 3), baseline = baseline, envelopes = envelopes,
+			jointEnvelopes = reportEnvelopes, historySpan = historySpan, historySamples = historySamples,
+			historyMinimumSpan = minimumSpan, historyMinimumSamples = minimumSamples,
+			calibrated = minimumSpan >= 0.5 and minimumSamples >= 10 and #reportEnvelopes > 0 and maximumAge <= 0.15 and quietBeforeInput,
+			historyMaximumSampleAge = if maximumAge < math.huge then maximumAge else nil, historyQuietBeforeInput = quietBeforeInput,
+			baselineSource = if rawBaselines == 0 then "last_rendered" else if renderedBaselines == 0 then "raw_fallback" else "mixed",
+			rawToRenderedAngleMax = rawDifference,
+			envelopePolicy = "pre_input_observed_1.0s_per_joint_plus_margin", historyExcludesInputSeconds = 1.6 })
 		if #windows > 80 then table.remove(windows, 1) end
 	end))
 	for name, ability in remotes do
@@ -129,13 +216,24 @@ function Probe.new(player: Player, options: any?): any
 	table.insert(connections, RunService.PreSimulation:Connect(function() simulationFrames += 1 end))
 	local function observeJoints(field: string, label: string, rendered: boolean)
 		local step = 0
+		local at = os.clock()
+		if character and (historyLife ~= character:GetAttribute("CombatLife") or historyClass ~= character:GetAttribute("CombatClass")) then resetHistory() end
 		for _, joint in joints do
 			if not joint.Parent then continue end
 			local current = transform(joint)
 			if current then
 				local previous = previousJoints[joint]
 				if previous then local _, angle = previous:ToObjectSpace(current):ToAxisAngle(); step = math.max(step, math.abs(angle)) end
-				if rendered then previousJoints[joint] = current end
+				if rendered then previousJoints[joint], previousJointAt[joint] = current, at end
+				-- Calibration uses only observations before the next input. A previous
+				-- action's 1.6-second observation window must not inflate "natural" motion.
+				if rendered then
+					local history = currentHistory(joint, at)
+					if at - lastInputAt > 1.6 and (#history == 0 or at - history[#history].at >= 1 / 240) then
+						table.insert(history, { at = at, value = current })
+						if #history > HISTORY_CAPACITY then table.remove(history, 1) end
+					end
+				end
 				for _, window in windows do
 					if os.clock() - window.localAt > 1.6 or not window.baseline[joint] then continue end
 					if not character or window.life ~= character:GetAttribute("CombatLife") then continue end
@@ -143,9 +241,16 @@ function Probe.new(player: Player, options: any?): any
 					local _, angle = delta:ToAxisAngle()
 					window.maxRelativeToBaseline = math.max(window.maxRelativeToBaseline or 0, math.abs(angle))
 					window.maxTranslationToBaseline = math.max(window.maxTranslationToBaseline or 0, delta.Position.Magnitude)
-					if not window[field] and (math.abs(angle) > window.jointThreshold or delta.Position.Magnitude > 0.025) then
+					local calibrated = window.envelopes[joint]
+					local angleThreshold, translationThreshold = calibrated.angleThreshold, calibrated.translationThreshold
+					if not window[field] and (math.abs(angle) > angleThreshold or delta.Position.Magnitude > translationThreshold) then
 						window[field] = mark(label, { inputId = window.inputId, joint = joint.Name,
-							angle = math.abs(angle), translation = delta.Position.Magnitude, elapsed = os.clock() - window.localAt }).at
+							angle = math.abs(angle), translation = delta.Position.Magnitude, elapsed = os.clock() - window.localAt,
+							angleThreshold = angleThreshold, translationThreshold = translationThreshold,
+							preInputAngleEnvelope = calibrated.angleEnvelope, preInputTranslationEnvelope = calibrated.translationEnvelope,
+							historySpan = calibrated.span, historySamples = calibrated.samples,
+							baselineSource = calibrated.baselineSource, baselineAge = calibrated.baselineAge,
+							rawToRenderedAngle = calibrated.rawToRenderedAngle, rawToRenderedTranslation = calibrated.rawToRenderedTranslation }).at
 					end
 				end
 			end
@@ -187,8 +292,10 @@ function Probe.new(player: Player, options: any?): any
 		mark = mark,
 		inspect = function(): any
 			local inputs = {}
-			for _, window in windows do local copy = table.clone(window); copy.baseline = nil; table.insert(inputs, copy) end
-			return { events = ordered(events), samples = ordered(samples), inputs = inputs, snapshot = snapshot(),
+			for _, window in windows do
+				local copy = table.clone(window); copy.baseline, copy.envelopes = nil, nil; table.insert(inputs, copy)
+			end
+			return { events = ordered(events), samples = ordered(samples), inputs = inputs, snapshot = snapshot(), calibration = calibration(),
 				droppedEvents = math.max(0, serial - capacity), droppedSamples = math.max(0, sampleSerial - capacity), stopped = stopped }
 		end,
 		destroy = function()
@@ -196,8 +303,8 @@ function Probe.new(player: Player, options: any?): any
 			mark("destroy"); stopped = true
 			for _, connection in connections do connection:Disconnect() end
 			for _, connection in bodyConnections do connection:Disconnect() end
-			table.clear(connections); table.clear(bodyConnections); table.clear(joints); table.clear(previousJoints); table.clear(watched)
-			for _, window in windows do window.baseline = nil end
+			table.clear(connections); table.clear(bodyConnections); table.clear(joints); table.clear(previousJoints); table.clear(previousJointAt); table.clear(jointHistory); table.clear(watched)
+			for _, window in windows do window.baseline, window.envelopes = nil, nil end
 		end,
 	}
 end

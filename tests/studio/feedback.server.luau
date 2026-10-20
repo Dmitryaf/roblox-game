@@ -131,6 +131,10 @@ local function traceReceipt(players: { Player }, actor: Player, ability: string,
 	end
 end
 local function assertSuccess(players: { Player }, actor: Player, target: Player, ability: string, point: Vector3, expected: number)
+	-- A previous action is excluded from the read-only natural-motion calibration.
+	-- Wait for an observed quiet window instead of silently measuring with no history.
+	waitFor(function() return command(actor, "feedbackInspect").probe.calibration.ready end,
+		7, "Feedback did not collect a full pre-input natural joint history")
 	local starts = mark(players, ability, "accepted")
 	local before = #losses[target]
 	local result = command(actor, "cast", { ability = ability, point = point, ok = true })
@@ -145,9 +149,31 @@ local function assertSuccess(players: { Player }, actor: Player, target: Player,
 	local reportsByPlayer = collect(players, starts)
 	local ownerReport = reportsByPlayer[actor].probe
 	local input = inputWindow(ownerReport, ability, result.reply.life)
+	assert(input.calibrated and input.historyMinimumSpan >= 0.5 and input.historyMinimumSamples >= 10,
+		"Accepted input lacked the required observed natural joint history")
+	print("FeedbackCalibration", ability, "variant", feedbackVariant, "samplesMin", input.historyMinimumSamples,
+		"spanMin", input.historyMinimumSpan, "policy", input.envelopePolicy, "baselineSource", input.baselineSource,
+		"rawToRenderedMax", input.rawToRenderedAngleMax)
+	for _, candidate in ownerReport.events do
+		local data = candidate.data
+		if (candidate.label == "joint_change_candidate" or candidate.label == "joint_simulation_candidate")
+			and data and data.inputId == input.inputId then
+			print("FeedbackJointCandidate", ability, candidate.label, "joint", data.joint, "at", candidate.at,
+				"angle", data.angle, "threshold", data.angleThreshold, "envelope", data.preInputAngleEnvelope,
+				"baselineSource", data.baselineSource, "rawDelta", data.rawToRenderedAngle)
+		end
+	end
 	local actionId = action.swingId or action.castId
 	local prepared = matching(ownerReport.events, "remote_preparing", ability, actor, result.reply.requestId, actionId)
 	assert(#prepared == 1, "One input produced duplicate accepted starts or lost its request correlation")
+	for _, event in ownerReport.events do
+		if (event.label == "joint_change_candidate" or event.label == "joint_simulation_candidate")
+			and event.data.inputId == input.inputId then
+			print("FeedbackJointCandidate", ability, feedbackVariant, "input", input.at, "received", prepared[1].at,
+				"at", event.at, "joint", event.data.joint, "angle", event.data.angle,
+				"translation", event.data.translation, "elapsed", event.data.elapsed)
+		end
+	end
 	if feedbackBaseline then
 		assert(input.firstJointChangeSimulation and input.firstJointChange,
 			"Preview-off control omitted actual visible preparation joints")
