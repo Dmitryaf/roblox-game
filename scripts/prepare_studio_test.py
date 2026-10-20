@@ -49,6 +49,7 @@ if warrior:
     project["tree"]["ServerStorage"]["$attributes"] = {"MatchTest": True, "WarriorTest": True}
     project["tree"]["ReplicatedStorage"]["WarriorTestControl"] = {"$className": "RemoteEvent"}
     project["tree"]["ReplicatedStorage"]["WarriorTestDriver"] = {"$path": str(ROOT / "tests/studio/client/WarriorDriver.luau")}
+    project["tree"]["ReplicatedStorage"]["WarriorMotionProbe"] = {"$path": str(ROOT / "tests/studio/client/WarriorMotionProbe.luau")}
     project["tree"]["ServerScriptService"]["WarriorTest"] = {"$path": str(ROOT / "tests/studio/warrior.server.luau")}
     project["tree"]["StarterPlayer"]["StarterPlayerScripts"]["WarriorTest"] = {"$path": str(ROOT / "tests/studio/warrior.client.luau")}
 # This project lives in build/, so resolve source paths before writing it.

@@ -128,6 +128,15 @@ local ok, problem = xpcall(function()
 	assert(fresh.life > deadLife and fresh.classId == "warrior" and fresh.effectChildren == 0,
 		"New warrior life retained previous swing effects")
 	command(fighter, "classProbe", { classId = "warlock", reason = "locked" })
+	-- Existing static hit/death checks above remain unchanged. Exercise a separate
+	-- clear lane only after the full first-swing lifecycle has completed.
+	settled(fighter, Vector3.new(70, 3, 55))
+	settled(target, Vector3.new(-70, 3, -55))
+	local motion = command(fighter, "runWhileMoving")
+	local final = bridge:Invoke("position", fighter.UserId)
+	assert(motion.accepted == 3 and motion.distance >= 52 and final ~= nil and final.Z < 3,
+		"Server did not observe the moving warrior crossing its lane")
+	print("WarriorMotionServer", motion.distance, motion.attackSpeed, final)
 	print("PASS warrior: real ClassHud WarriorButton -> new life/class/armour, queue/match lock, wrong-class magic refusal, real LMB -> one 20 damage, observer strike, death during windup, respawn with class and cleanup")
 end, debug.traceback)
 for _, connection in connections do connection:Disconnect() end

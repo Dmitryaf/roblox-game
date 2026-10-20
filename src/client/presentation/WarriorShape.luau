@@ -1,7 +1,6 @@
 --!strict
 -- Original local armour and sword. The underlying avatar and every authoritative joint stay intact.
 local WarriorShape = {}
-type Piece = { part: BasePart, anchor: BasePart, offset: CFrame }
 local steel = Color3.fromRGB(119, 132, 141)
 local dark = Color3.fromRGB(45, 52, 59)
 local silver = Color3.fromRGB(207, 218, 222)
@@ -23,15 +22,16 @@ function WarriorShape.new(character: Model): any
 	local scale = math.clamp(torso.Size.X / 2, 0.8, 1.25)
 	local folder = Instance.new("Folder")
 	folder.Name, folder.Parent = "WarriorArmour", character
-	local pieces: { Piece } = {}
 	local function piece(name: string, anchor: BasePart, size: Vector3, offset: CFrame, color: Color3, fabric: boolean?, wedge: boolean?): BasePart
 		local p: BasePart = if wedge then Instance.new("WedgePart") else Instance.new("Part")
 		p.Name, p.Size, p.Color = name, size * scale, color
-		p.Anchored, p.Massless, p.CanCollide, p.CanQuery, p.CanTouch = true, true, false, false, false
+		p.Anchored, p.Massless, p.CanCollide, p.CanQuery, p.CanTouch = false, true, false, false, false
 		p.Material, p.CastShadow = if fabric then Enum.Material.Fabric else Enum.Material.Metal, true
 		local frame = CFrame.new(offset.Position * scale) * offset.Rotation
 		p.CFrame, p.Parent = anchor.CFrame * frame, folder
-		table.insert(pieces, {part = p, anchor = anchor, offset = frame})
+		local weld = Instance.new("Weld")
+		weld.Name, weld.Part0, weld.Part1 = "WarriorVisualWeld", anchor, p
+		weld.C0, weld.C1, weld.Parent = frame, CFrame.identity, p
 		return p
 	end
 	piece("SteelBreastplate", torso, Vector3.new(1.95, if r15 then 1.45 else 1.9, 1.16), CFrame.new(0, 0, 0.01), dark)
@@ -55,7 +55,7 @@ function WarriorShape.new(character: Model): any
 		piece("WarriorBoot" .. side, foot, Vector3.new(0.82, if r15 then 0.55 else 0.8, 1.13), CFrame.new(0, if r15 then 0 else -0.66, -0.14), dark)
 	end
 	local hand = character:FindFirstChild(if r15 then "RightHand" else "Right Arm") :: BasePart
-	local grip = CFrame.new(0, if r15 then -0.08 else -0.9, -0.1) * CFrame.Angles(-0.35, 0, -0.15)
+	local grip = CFrame.new(0, if r15 then -0.08 else -0.9, -0.1) * CFrame.Angles(-math.pi / 2, 0, -0.15)
 	piece("WarriorSwordGrip", hand, Vector3.new(0.22, 0.8, 0.24), grip, red, true)
 	piece("WarriorSwordPommel", hand, Vector3.new(0.38, 0.27, 0.36), grip * CFrame.new(0, -0.52, 0), dark)
 	piece("WarriorSwordGuard", hand, Vector3.new(1.17, 0.16, 0.3), grip * CFrame.new(0, 0.46, 0), dark)
@@ -64,7 +64,7 @@ function WarriorShape.new(character: Model): any
 	piece("WarriorSwordTip", hand, Vector3.new(0.39, 0.48, 0.1), grip * CFrame.new(0, 3.73, 0) * CFrame.Angles(0, math.pi / 2, 0), silver, false, true)
 	local shape = {folder = folder}
 	function shape.step(_now: number)
-		for _, item in pieces do if item.anchor.Parent then item.part.CFrame = item.anchor.CFrame * item.offset end end
+		-- Native joints follow animation in the same simulation/render pass; no delayed CFrame copying.
 	end
 	function shape.destroy() folder:Destroy() end
 	return shape

@@ -10,6 +10,8 @@ local function waitFor(predicate: () -> boolean, seconds: number, message: strin
 	error(message)
 end
 function Driver.new(player: Player)
+	local loadModule = require :: any
+	local MotionProbe: any = loadModule(ReplicatedStorage:WaitForChild("WarriorMotionProbe", 20) :: ModuleScript)
 	local classRemote = ReplicatedStorage:WaitForChild("ClassRemote", 20) :: RemoteEvent
 	local meleeRemote = ReplicatedStorage:WaitForChild("MeleeRemote", 20) :: RemoteEvent
 	local arrowRemote = ReplicatedStorage:WaitForChild("ArrowRemote", 20) :: RemoteEvent
@@ -19,6 +21,7 @@ function Driver.new(player: Player)
 	local replies: { [string]: { [number]: any } } = { class = {}, arrow = {}, hands = {} }
 	local meleeReply: any = nil
 	local meleeReplies, preparing, struck, arrowPreparing = 0, 0, 0, 0
+	local replyHistory: { any } = {}
 	local visualSeen = false
 	local probeId = 500000
 	local aim: RBXScriptConnection? = nil
@@ -31,7 +34,10 @@ function Driver.new(player: Player)
 	end
 	observe(classRemote, "class"); observe(arrowRemote, "arrow"); observe(handsRemote, "hands")
 	table.insert(connections, meleeRemote.OnClientEvent:Connect(function(event: any)
-		if event.kind == "reply" then meleeReplies += 1; meleeReply = event end
+		if event.kind == "reply" then
+			meleeReplies += 1; meleeReply = event
+			table.insert(replyHistory, { at = os.clock(), event = event })
+		end
 		if event.kind == "preparing" and event.owner == player.UserId then preparing += 1 end
 		if event.kind == "struck" then
 			struck += 1
@@ -72,8 +78,11 @@ function Driver.new(player: Player)
 			for _, item in armour:GetDescendants() do
 				if item:IsA("BasePart") then
 					count += 1
-					assert(item.Anchored and item.Massless and not item.CanCollide and not item.CanQuery and not item.CanTouch,
+					assert(not item.Anchored and item.Massless and not item.CanCollide and not item.CanQuery and not item.CanTouch,
 						"Warrior appearance entered combat physics")
+                    local weld = item:FindFirstChild("WarriorVisualWeld")
+                    assert(weld and weld:IsA("Weld") and weld.Part1 == item and weld.Part0 ~= nil
+                        and weld.Part0.Parent == character, "Warrior appearance is not attached to its live body")
 				end
 			end
 		end
@@ -97,6 +106,10 @@ function Driver.new(player: Player)
 	end
 	function driver.run(action: string, data: any?): any
 		if action == "inspect" then return inspect() end
+		if action == "runWhileMoving" then
+			return MotionProbe.run(player, { root = root, inspect = inspect, click = click, history = replyHistory,
+				replyCount = function() return meleeReplies end, reply = function() return meleeReply end })
+		end
 		if action == "chooseWarrior" then
 			local hud = player.PlayerGui:FindFirstChild("ClassHud") :: ScreenGui
 			local button = hud:FindFirstChild("WarriorButton", true) :: TextButton
