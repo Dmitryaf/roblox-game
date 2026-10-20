@@ -91,12 +91,20 @@ control.OnClientEvent:Connect(function(id, action, data)
         elseif action == "inspect" then
             local folder = workspace:FindFirstChild("LocalHandsEffects")
             assert(folder, "Hands presentation folder absent")
-            local count = 0
+            local count, palms, spirals, veils = 0, 0, 0, 0
             for _, item in folder:GetDescendants() do
                 if item:IsA("BasePart") then
                     count += 1
+                    if item.Name == "DemonicPalm" then
+                        palms += 1
+                        assert(item.Size.X <= 0.87 and item.Size.Y <= 0.7, "Hands did not become smaller")
+                    end
                     assert(item.Anchored and not item.CanCollide and not item.CanQuery and not item.CanTouch,
                         "Hands visuals entered physics: " .. item.Name)
+                elseif item:IsA("Beam") and item.Name == "FelVapourSpiral" then
+                    spirals += 1
+                elseif item:IsA("ParticleEmitter") and item.Name == "GreenVortexVeil" then
+                    veils += 1
                 end
             end
             local query = OverlapParams.new()
@@ -106,7 +114,7 @@ control.OnClientEvent:Connect(function(id, action, data)
             local character = player.Character
             local root = if character then character:FindFirstChild("HumanoidRootPart") else nil
             result = { position = if root and root:IsA("BasePart") then root.Position else nil,
-                observed = observed, count = count, children = #folder:GetChildren(), state = state,
+                observed = observed, count = count, palms = palms, spirals = spirals, veils = veils, children = #folder:GetChildren(), state = state,
                 preparing = preparing, active = active, ended = ended, hud = player.PlayerGui:FindFirstChild("HandsHud") ~= nil }
         else error("Unknown fixture action") end
     end, debug.traceback)

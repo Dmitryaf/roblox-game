@@ -4,10 +4,11 @@ local RunService = game:GetService("RunService")
 local Debris = game:GetService("Debris")
 local Style = require(game:GetService("ReplicatedStorage").Shared.presentation.ArrowStyle)
 local Shape = require(script.Parent.HandsShape)
+local Vortex = require(script.Parent.HandsVortex)
 local HandsEffects = {}
 export type Casting = { begin: (number, number, Vector3?, number?) -> (), stop: (number) -> () }
 type Entry = { event: any, root: BasePart, boundary: { BasePart }, cracks: { BasePart }, hands: { any },
-	fires: { ParticleEmitter }, mist: ParticleEmitter, ground: BasePart, active: boolean }
+	fires: { ParticleEmitter }, mist: ParticleEmitter, ground: BasePart, vortex: any, active: boolean }
 
 local function part(parent: Instance, name: string, size: Vector3, frame: CFrame, color: Color3, neon: boolean?): Part
 	local p = Instance.new("Part")
@@ -54,12 +55,16 @@ local function create(folder: Folder, event: any): Entry
 	local hands: { any } = {}
 	local fires: { ParticleEmitter } = {}
 	local cracks: { BasePart } = {}
-	for index = 1, 4 do
-		local angle = index * math.pi / 2 + 0.3
-		local offset = Vector3.new(math.sin(angle), 0, math.cos(angle)) * radius * 0.55
+	for index = 1, 12 do
+		local outer = index > 5
+		local slot = if outer then index - 6 else index - 1
+		local count = if outer then 7 else 5
+		local angle = slot * math.pi * 2 / count + (if outer then 0.39 else -0.15) + math.sin(index * 2.7) * 0.12
+		local distance = radius * ((if outer then 0.73 else 0.34) + math.sin(index * 1.9) * 0.045)
+		local offset = Vector3.new(math.sin(angle), 0, math.cos(angle)) * distance
 		local center = position + offset
 		local frame = CFrame.lookAt(center, position)
-		table.insert(hands, Shape.new(root, frame, 0.95 + index * 0.08, index))
+		table.insert(hands, Shape.new(root, frame, 0.45 + ((index * 7) % 6) * 0.03, index))
 		local anchor = Instance.new("Attachment")
 		anchor.Position, anchor.Parent = offset + Vector3.new(0, 0.1, 0), root
 		table.insert(fires, emitter(anchor, false))
@@ -71,7 +76,7 @@ local function create(folder: Folder, event: any): Entry
 		table.insert(cracks, part(root, "CurseGroundFracture", Vector3.new(0.1, 0.02, radius * 0.36), frame, Style.flame, true))
 	end
 	return {event = event, root = root, boundary = boundary, cracks = cracks, hands = hands, fires = fires,
-		mist = emitter(root, true), ground = ground, active = false}
+		mist = emitter(root, true), ground = ground, vortex = Vortex.new(root, radius), active = false}
 end
 
 function HandsEffects.new(casting: Casting)
@@ -106,11 +111,12 @@ function HandsEffects.new(casting: Casting)
 			crack.Transparency = (if entry.active then 0.37 + math.sin(now * 5 + index) * 0.08 else 0.8 - progress * 0.45) + fading * 0.5
 		end
 		for index, hand in entry.hands do
-			local rise = if entry.active then math.clamp((age - (index - 1) * 0.035) / 0.24, 0, 1) else 0
+			local rise = if entry.active then math.clamp((age - ((index - 1) % 4) * 0.035) / 0.24, 0, 1) else 0
 			hand.step(now, rise * (1 - fading), if entry.active then fading else 1)
-			entry.fires[index].Rate = if entry.active then 4 * (1 - fading) else 0
+			entry.fires[index].Rate = if entry.active then 2 * (1 - fading) else 0
 		end
 		entry.mist.Rate = if entry.active then 2 * (1 - fading) else 0
+		entry.vortex.step(age, entry.active, fading)
 	end
 	function effects.event(event: any, quiet: boolean?)
 		if stopped then return end
