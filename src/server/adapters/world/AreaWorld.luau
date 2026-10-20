@@ -34,6 +34,20 @@ function AreaWorld.new(world: any, policy: any)
             if math.abs(center.Y - (origin.Y - 4)) > 4 then return nil, "invalid_target" end
             if not bounded(owner, center + Vector3.yAxis * 3) or not visible(origin, center + Vector3.yAxis, nil) then return nil, "invalid_target" end
             if policy and policy.barrier(owner, origin, center + Vector3.yAxis - origin) then return nil, "invalid_target" end
+            -- A support ray starting inside a tall wall does not see its top. Check
+            -- the occupied footprint above the floor before testing its support.
+            local occupied = OverlapParams.new()
+            occupied.FilterType, occupied.FilterDescendantsInstances = Enum.RaycastFilterType.Exclude, characters(nil)
+            for _, obstacle in workspace:GetPartBoundsInBox(CFrame.new(center + Vector3.yAxis * 1.5), Vector3.new(radius * 2, 2, radius * 2), occupied) do
+                if not obstacle.CanCollide then continue end
+                local model = obstacle:FindFirstAncestorOfClass("Model")
+                if model and model:FindFirstChildOfClass("Humanoid") then continue end
+                local point = obstacle.CFrame:PointToObjectSpace(center + Vector3.yAxis * 1.5)
+                local half = obstacle.Size / 2
+                local closest = obstacle.CFrame:PointToWorldSpace(Vector3.new(math.clamp(point.X, -half.X, half.X),
+                    math.clamp(point.Y, -half.Y, half.Y), math.clamp(point.Z, -half.Z, half.Z)))
+                if ((closest - center) * Vector3.new(1, 0, 1)).Magnitude <= radius then return nil, "invalid_target" end
+            end
             -- Require the whole footprint to stay supported and outside protected pads/walls.
             for i = 1, 8 do
                 local angle = i * math.pi / 4
