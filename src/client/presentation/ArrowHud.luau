@@ -36,6 +36,8 @@ function ArrowHud.new(playerGui: PlayerGui)
 	gui.Parent = playerGui
 	return {
 		show = function(status: string, note: string)
+			local character = game:GetService("Players").LocalPlayer.Character
+			gui.Enabled = not character or character:GetAttribute("CombatClass") ~= "warrior"
 			panel.Text = "ДЕМОНИЧЕСКАЯ СТРЕЛА\n" .. status .. "\n" .. note
 		end,
 		destroy = function() gui:Destroy() end,

@@ -8,6 +8,7 @@ function ArrowInput.bind(player: Player, cast: (Vector3) -> (), teleport: () -> 
 		if state ~= Enum.UserInputState.Begin or UserInputService:GetFocusedTextBox() then return Enum.ContextActionResult.Pass end
 		local camera = workspace.CurrentCamera
 		local character = player.Character
+		if character and character:GetAttribute("CombatClass") == "warrior" then return Enum.ContextActionResult.Pass end
 		local root = if character then character:FindFirstChild("HumanoidRootPart") else nil
 		if not camera or not root or not root:IsA("BasePart") then return Enum.ContextActionResult.Pass end
 		local mouse = UserInputService:GetMouseLocation()
@@ -32,6 +33,7 @@ function ArrowInput.bind(player: Player, cast: (Vector3) -> (), teleport: () -> 
 	ContextActionService:BindAction("CastArrow", onCast, false, Enum.UserInputType.MouseButton1)
 	ContextActionService:BindAction("TeleportArrow", function(_, state)
 		if state ~= Enum.UserInputState.Begin or UserInputService:GetFocusedTextBox() then return Enum.ContextActionResult.Pass end
+		if player.Character and player.Character:GetAttribute("CombatClass") == "warrior" then return Enum.ContextActionResult.Pass end
 		teleport()
 		return Enum.ContextActionResult.Sink
 	end, false, Enum.KeyCode.E)

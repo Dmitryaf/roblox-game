@@ -55,6 +55,10 @@ function WarlockAppearance.new()
 			end
 			local character = entry.character
 			if not character or not character.Parent or entry.dead then continue end
+            if character:GetAttribute("CombatClass") == "warrior" then
+                if entry.costume then clear(entry) end
+                continue
+            end
 			if entry.costume and entry.costume.folder.Parent ~= character then clear(entry) end
 			if not entry.costume then
 				local humanoid = character:FindFirstChildOfClass("Humanoid")

@@ -104,6 +104,8 @@ function MatchHud.new(playerGui: PlayerGui)
 	return {
 		setAction = function(action: (string) -> ()) callback = action end,
 		show = function(state: any, pending: boolean, note: string)
+			local character = game:GetService("Players").LocalPlayer.Character
+			local className = if character and character:GetAttribute("CombatClass") == "warrior" then "Воин" else "Чернокнижник"
 			pendingAction = pending
 			readyButton.Active, exitButton.Active = not pending, not pending
 			readyButton.AutoButtonColor, exitButton.AutoButtonColor = not pending, not pending
@@ -111,7 +113,7 @@ function MatchHud.new(playerGui: PlayerGui)
 			feedback.TextColor3 = Color3.fromRGB(255, 216, 153)
 			if not state then
 				score.Text, objective.Text = "Подключаемся…", "Удерживайте центральную зону своей командой."
-				title.Text, status.Text = "Тренировка · Чернокнижник", "Получаем состояние сервера…"
+				title.Text, status.Text = "Тренировка · " .. className, "Получаем состояние сервера…"
 				readyButton.Visible, exitButton.Visible = false, false
 				return
 			end
@@ -132,13 +134,13 @@ function MatchHud.new(playerGui: PlayerGui)
 				else if state.result then "R · Играть снова" else "R · Готов к матчу"
 			exitButton.Text = if pending then "Ожидаем сервер…" else "B · Выйти в тренировку"
 			if participant then
-				title.Text = "Команда " .. (if state.team == 1 then "A" else "B") .. " · Чернокнижник"
+				title.Text = "Команда " .. (if state.team == 1 then "A" else "B") .. " · " .. className
 				status.Text = if phase == "paused" then "Ждём замену · " .. clock(state.displayDeadline or 0)
 					else if state.pairDeadline then "Вход парой через " .. clock(state.displayPairDeadline or 0) .. ". R — отменить вход."
 					else if phase == "countdown" or phase == "resuming" then "Вы на стартовой площадке. Бой скоро начнётся."
 					else "Займите зону. Убийства помогают удержанию, но не дают очков."
 			else
-				title.Text = "Тренировка · Чернокнижник"
+				title.Text = "Тренировка · " .. className
 				if state.ready then
 					local reason = waitingReasons[state.waitingReason] or "Ожидаем входа в равные составы."
 					if state.waitingReason == "pair_preparing" then reason ..= " " .. clock(state.displayPairDeadline or 0) end
@@ -149,7 +151,7 @@ function MatchHud.new(playerGui: PlayerGui)
 						else if result.winner == nil then "Ничья" else "Победила команда " .. (if result.winner == 1 then "A" else "B")
 					status.Text = string.format("%s · %d : %d\nНажмите «Играть снова» для нового матча.", outcome, result.scoreA, result.scoreB)
 				else
-					status.Text = "Испытайте стрелу на мишени. Нажмите «Готов», чтобы войти в матч за зону."
+					status.Text = "Испытайте способности на мишени. Нажмите «Готов», чтобы войти в матч за зону."
 				end
 			end
 		end,

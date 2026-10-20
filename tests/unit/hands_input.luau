@@ -22,7 +22,7 @@ local function fixture()
 	local f = { mouse = Vector2.new(500, 336), focused = nil, casts = {}, invalid = 0, actions = {}, rays = {}, unbound = {}, blockers = {}, queries = 0 }
 	f.hit = { Position = Vector3.new(20, 2, -30), Normal = Vector3.new(0, 1, 0), Instance = partOf(model(false)) }
 	local root = {}; function root:IsA(class) return class == "BasePart" end
-	local character = {}; function character:FindFirstChild() return root end
+	local character = {}; function character:GetAttribute() return f.classId end; function character:FindFirstChild() return root end
 	local gui = {}
 	function gui:GetGuiObjectsAtPosition(x, y)
 		if x >= 40 and x <= 220 and y >= 160 and y <= 190 then
@@ -125,5 +125,10 @@ test("cleanup removes only the hands binding", function()
 	f.stop()
 	assert(#f.unbound == 1 and f.unbound[1] == "CastHands" and f.actions.CastArrow ~= nil)
 	assert(f.press() == "Pass" and #f.casts == 0)
+end)
+test("warrior input does not consume magic controls", function()
+ local f = fixture(); f.classId = "warrior"
+ assert(f.press() == "Pass" and #f.casts == 0 and #f.rays == 0 and f.invalid == 0)
+ f.stop()
 end)
 print(string.format("%d HandsInput interaction tests passed", total))

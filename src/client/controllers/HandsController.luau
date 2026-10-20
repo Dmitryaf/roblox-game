@@ -2,6 +2,7 @@
 local RunService = game:GetService("RunService")
 local HandsController = {}
 local reasons: { [string]: string } = {
+	wrong_class = "Выберите чернокнижника, чтобы использовать заклинание.",
 	blocked = "Область здесь не поместится. Выберите другое место.",
 	invalid_target = "Укажите доступную поверхность земли.",
 	invalid_position = "Позиция уточняется. Повторите действие.",

@@ -32,7 +32,7 @@ local function fixture()
 	end
 	local root = { Position = Vector3.new(2, 3, 4) }
 	function root:IsA(class) return class == "BasePart" end
-	local character = {}
+	local character = {}; function character:GetAttribute() return f.classId end
 	function character:FindFirstChild(name) return if name == "HumanoidRootPart" then root else nil end
 	local player = { Character = character }
 	function player:FindFirstChildOfClass(class) return if class == "PlayerGui" then gui else nil end
@@ -117,5 +117,11 @@ test("E invokes teleport once and cleanup removes both input bindings", function
 	assert(#f.unbound == 2 and f.actions.CastArrow == nil and f.actions.TeleportArrow == nil)
 	assert(f.press("CastArrow") == "Pass" and f.press("TeleportArrow") == "Pass")
 	assert(#f.casts == 0 and f.teleports == 1)
+end)
+test("warrior input does not consume magic controls", function()
+ local f = fixture(); f.classId = "warrior"
+ assert(f.press("CastArrow") == "Pass" and f.press("TeleportArrow") == "Pass")
+ assert(#f.casts == 0 and f.teleports == 0 and #f.rays == 0)
+ f.stop()
 end)
 print(string.format("%d ArrowInput interaction tests passed", total))

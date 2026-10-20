@@ -24,6 +24,8 @@ function HandsHud.new(playerGui: PlayerGui)
 	gui.Parent = playerGui
 	return {
 		show = function(status: string, note: string)
+			local character = game:GetService("Players").LocalPlayer.Character
+			gui.Enabled = not character or character:GetAttribute("CombatClass") ~= "warrior"
 			panel.Text = "Q · ДЕМОНИЧЕСКИЕ РУКИ\n" .. status .. "\n" .. note
 		end,
 		destroy = function() gui:Destroy() end,

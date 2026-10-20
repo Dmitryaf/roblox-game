@@ -9,6 +9,7 @@ function HandsInput.bind(player: Player, cast: (Vector3) -> (), invalid: (() -> 
 	local function onCast(_: string, state: Enum.UserInputState)
 		if state ~= Enum.UserInputState.Begin or UserInputService:GetFocusedTextBox() then return Enum.ContextActionResult.Pass end
 		local character, camera = player.Character, workspace.CurrentCamera
+		if character and character:GetAttribute("CombatClass") == "warrior" then return Enum.ContextActionResult.Pass end
 		local root = if character then character:FindFirstChild("HumanoidRootPart") else nil
 		if not camera or not character or not root or not root:IsA("BasePart") then return Enum.ContextActionResult.Pass end
 		local mouse = UserInputService:GetMouseLocation()
