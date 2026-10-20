@@ -120,6 +120,17 @@ local ok, err = xpcall(function()
         assert(#targets == 1 and targets[1].Parent:GetAttribute("TrainingTarget"), "Hands could not find the real training target")
         assert(#world.areaTargets(101, Vector3.new(230, 0, -30), 8) == 0, "Match hands selected a training target")
     end)
+    test("sword aim approval leaves accepted body transform and velocity untouched", function()
+        world.move(102, Vector3.new(230, 3.2, -12))
+        local root = roots[102]
+        root.AssemblyLinearVelocity = Vector3.new(0, 0, -16)
+        local frame, velocity = root.CFrame, root.AssemblyLinearVelocity
+        assert(world.face(102, Vector3.xAxis), "Valid sword aim was rejected")
+        assert(root.CFrame == frame and root.AssemblyLinearVelocity == velocity,
+            "Sword aim wrote a server transform or interrupted running velocity")
+        assert(not world.face(102, Vector3.yAxis), "Vertical aim was accepted")
+        root.AssemblyLinearVelocity = Vector3.zero
+    end)
     test("sword selects several front targets once and excludes behind, range and height", function()
         world.move(102, Vector3.new(230, 3.2, -12))
         local targets: { Humanoid } = {}
