@@ -14,8 +14,10 @@ ROOT = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser()
 parser.add_argument('--authoring', action='store_true')
 parser.add_argument('--native', action='store_true', help='Review the opt-in experiment with native combat clips')
+parser.add_argument('--auto', action='store_true', help='Advance comparison scenes automatically and return a Studio test result')
 args = parser.parse_args()
 assert not (args.authoring and args.native), 'Choose authoring or native combat review'
+assert not (args.authoring and args.auto), 'Authoring is an interactive scene'
 token = 'living-review-' + uuid.uuid4().hex
 out = ROOT / 'build/living-magic' / token
 out.mkdir(parents=True)
@@ -46,6 +48,7 @@ else:
         'MixedClassDriver': {'$path': 'tests/studio/client/DashDriver.luau'},
     })
     project['tree']['ServerStorage'] = {'$attributes': {'MatchTest': True, 'ArenaTest': True}}
+    project['tree']['ServerStorage']['$attributes']['LivingReviewAuto'] = args.auto
     if args.native:
         project['tree']['ServerStorage']['$attributes']['LivingMagicExperiment'] = True
         project['tree']['ReplicatedStorage']['NativeCombatClips'] = {
@@ -81,7 +84,7 @@ end)
     (out / 'plugin.project.json').write_text(json.dumps({'name': token, 'tree': {'$path': 'plugin.server.luau'}}), encoding='utf-8')
 
 (out / 'review.project.json').write_text(json.dumps(project), encoding='utf-8')
-metadata = {'token': token, 'mode': 'authoring' if args.authoring else 'native' if args.native else 'baseline',
+metadata = {'token': token, 'mode': 'authoring' if args.authoring else 'native' if args.native else 'baseline', 'auto': args.auto,
     'directory': str(out), 'project': str(out / 'review.project.json'),
     'place': str(out / ('Authoring.rbxlx' if args.authoring else 'NativeReview.rbxlx' if args.native else 'Baseline.rbxlx')),
     'sourceHead': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(),

@@ -12,6 +12,8 @@ param(
     [switch]$FeedbackBaseline,
     [switch]$Transfer,
     [switch]$Living,
+    [switch]$Episode,
+    [switch]$NativeReview,
     [switch]$Arena,
     [switch]$ArenaStaged,
     [switch]$Overlap,
@@ -24,12 +26,15 @@ if (-not (Test-Path -LiteralPath $StudioExe)) { throw 'Studio executable not fou
 $taskRobloxRoot = Split-Path (Split-Path (Split-Path $StudioExe -Parent) -Parent) -Parent
 $taskPluginDir = Join-Path $taskRobloxRoot 'Plugins'
 $taskLogDir = Join-Path $taskRobloxRoot 'logs'
-if (([int]$Match.IsPresent + [int]$Multiplayer.IsPresent + [int]$Hands.IsPresent + [int]$Warrior.IsPresent + [int]$Dash.IsPresent + [int]$Contact.IsPresent + [int]$Heavy.IsPresent + [int]$Mixed.IsPresent + [int]$Feedback.IsPresent + [int]$FeedbackBaseline.IsPresent + [int]$Transfer.IsPresent + [int]$Living.IsPresent + [int]$Arena.IsPresent + [int]$ArenaStaged.IsPresent + [int]$Overlap.IsPresent) -gt 1) { throw 'Choose one runtime fixture' }
+if (([int]$Match.IsPresent + [int]$Multiplayer.IsPresent + [int]$Hands.IsPresent + [int]$Warrior.IsPresent + [int]$Dash.IsPresent + [int]$Contact.IsPresent + [int]$Heavy.IsPresent + [int]$Mixed.IsPresent + [int]$Feedback.IsPresent + [int]$FeedbackBaseline.IsPresent + [int]$Transfer.IsPresent + [int]$Living.IsPresent + [int]$Episode.IsPresent + [int]$NativeReview.IsPresent + [int]$Arena.IsPresent + [int]$ArenaStaged.IsPresent + [int]$Overlap.IsPresent) -gt 1) { throw 'Choose one runtime fixture' }
+if (($Episode -or $NativeReview) -and ($Clients -ne 2 -or $LagMs -ne 0)) { throw 'Review requires two clients and no injected lag; use Living for lag validation' }
 if (($Warrior -or $Dash -or $Contact -or $Heavy -or $Mixed -or $Feedback -or $FeedbackBaseline -or $Transfer -or $Living) -and $Clients -ne 2) { throw 'Warrior/dash/contact/heavy/mixed fixtures require two clients' }
 if (($Arena -or $ArenaStaged) -and $Clients -ne 6) { throw 'Arena combat fixture requires six real clients' }
 if ($Overlap -and $Clients -ne 4) { throw 'Overlap fixture requires four real clients' }
 if ($Clients -eq 4 -and -not $Overlap) { throw 'Four-client runner currently supports only overlap' }
-if ($Living) { python scripts/prepare_studio_test.py --living --clients $Clients --lag-ms $LagMs }
+if ($NativeReview) { python scripts/prepare_living_magic_review.py --native --auto }
+elseif ($Episode) { python scripts/prepare_living_episode.py --auto }
+elseif ($Living) { python scripts/prepare_studio_test.py --living --clients $Clients --lag-ms $LagMs }
 elseif ($ArenaStaged) { python scripts/prepare_studio_test.py --arena-staged --clients $Clients --lag-ms $LagMs }
 elseif ($FeedbackBaseline) { python scripts/prepare_studio_test.py --feedback-baseline --clients $Clients --lag-ms $LagMs }
 elseif ($Arena) { python scripts/prepare_studio_test.py --arena --clients $Clients --lag-ms $LagMs }
@@ -46,17 +51,27 @@ elseif ($Match) { python scripts/prepare_studio_test.py --match --clients $Clien
 elseif ($Multiplayer) { python scripts/prepare_studio_test.py --multiplayer --lag-ms $LagMs }
 else { python scripts/prepare_studio_test.py }
 if ($LASTEXITCODE -ne 0) { throw 'Could not prepare Studio test' }
-$taskToken = (Get-Content build/studio-test-token.txt).Trim()
-$taskPlace = Join-Path (Get-Location) "build/$taskToken.rbxlx"
-& .tools/rojo/rojo.exe build build/studio-test.project.json -o $taskPlace
+$taskProject = 'build/studio-test.project.json'
+$taskPluginProject = 'build/studio-plugin.project.json'
+if ($Episode -or $NativeReview) {
+    $taskMetadata = if ($NativeReview) { 'build/living-native-review.json' } else { 'build/living-episode-auto.json' }
+    $taskEpisode = Get-Content -LiteralPath $taskMetadata | ConvertFrom-Json
+    $taskToken, $taskPlace = $taskEpisode.token, $taskEpisode.place
+    $taskProject = $taskEpisode.project
+    $taskPluginProject = Join-Path $taskEpisode.directory 'plugin.project.json'
+} else {
+    $taskToken = (Get-Content build/studio-test-token.txt).Trim()
+    $taskPlace = Join-Path (Get-Location) "build/$taskToken.rbxlx"
+}
+& .tools/rojo/rojo.exe build $taskProject -o $taskPlace
 if ($LASTEXITCODE -ne 0) { throw 'Could not build Studio test' }
-& .tools/rojo/rojo.exe build build/studio-plugin.project.json -o build/WarlockGeometryTest.rbxmx
+& .tools/rojo/rojo.exe build $taskPluginProject -o build/WarlockGeometryTest.rbxmx
 if ($LASTEXITCODE -ne 0) { throw 'Could not build test plugin' }
-& .tools/rojo/rojo.exe sourcemap build/studio-test.project.json -o build/studio-sourcemap.json
+& .tools/rojo/rojo.exe sourcemap $taskProject --absolute -o build/studio-sourcemap.json
 if ($LASTEXITCODE -ne 0) { throw 'Could not map Studio test' }
 Push-Location build
 try {
-    $taskTestSources = if ($Multiplayer -or $Match -or $Hands -or $Warrior -or $Dash -or $Contact -or $Heavy -or $Mixed -or $Feedback -or $FeedbackBaseline -or $Transfer -or $Living -or $Overlap -or $Arena -or $ArenaStaged) { '../tests/studio' } else { @('../tests/studio/world.luau', '../tests/studio/match_world.luau', '../tests/studio/dash_world.luau', '../tests/studio/movement_contact_world.luau', '../tests/studio/slow_world.luau', '../tests/studio/area_placement_world.luau') }
+    $taskTestSources = if ($Multiplayer -or $Match -or $Hands -or $Warrior -or $Dash -or $Contact -or $Heavy -or $Mixed -or $Feedback -or $FeedbackBaseline -or $Transfer -or $Living -or $Episode -or $NativeReview -or $Overlap -or $Arena -or $ArenaStaged) { '../tests/studio' } else { @('../tests/studio/world.luau', '../tests/studio/match_world.luau', '../tests/studio/dash_world.luau', '../tests/studio/movement_contact_world.luau', '../tests/studio/slow_world.luau', '../tests/studio/area_placement_world.luau') }
     & ../.tools/luau-lsp/luau-lsp.exe analyze --platform roblox --sourcemap studio-sourcemap.json --definitions ../.tools/roblox.d.luau $taskTestSources
     if ($LASTEXITCODE -ne 0) { throw 'Studio test type check failed' }
 } finally { Pop-Location }
@@ -68,7 +83,7 @@ $taskCompleted = $false
 try {
     Copy-Item -LiteralPath build/WarlockGeometryTest.rbxmx -Destination $taskPlugin
     $taskProcess = Start-Process -FilePath $StudioExe -ArgumentList ('"' + $taskPlace + '"') -WindowStyle Hidden -PassThru
-    $taskLimit = if ($Arena -or $ArenaStaged) { 300 } elseif (($Match -and $Clients -eq 6) -or $Overlap) { 220 } else { 150 }
+    $taskLimit = if ($Arena -or $ArenaStaged) { 300 } elseif (($Match -and $Clients -eq 6) -or $Overlap -or $Living -or $Episode -or $NativeReview) { 220 } else { 150 }
     $taskDeadline = (Get-Date).AddSeconds($taskLimit)
     do {
         Start-Sleep -Milliseconds 1000

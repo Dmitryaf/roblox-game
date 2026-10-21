@@ -5,6 +5,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local control = ReplicatedStorage:WaitForChild("LivingReviewControl") :: RemoteEvent
 local bridge = game:GetService("ServerStorage"):WaitForChild("MatchTestBridge", 30) :: BindableFunction
 local token = (ReplicatedStorage:WaitForChild("StudioTestToken") :: StringValue).Value
+local automatic = game:GetService("ServerStorage"):GetAttribute("LivingReviewAuto") == true
 assert(game:GetService("RunService"):IsStudio() and token:match("^living%-review%-"))
 local ready: { [Player]: boolean } = {}
 local reports: { [number]: any } = {}
@@ -66,7 +67,8 @@ local ok, problem = xpcall(function()
         place(attacker, Vector3.new(-20, 3, 30)); place(target, Vector3.new(-20, 3, if arrow then 6 else 24))
         for _, player in players do control:FireClient(player, 0, "scene", { label = scene, effects = effects, attacker = attacker.UserId, target = target.UserId }) end
         print(token, "SCENE_READY", scene, "attacker", attacker.UserId, "target", target.UserId)
-        waitFor(function() return advance end, 1800, "Review awaiting N / next: " .. scene)
+        if automatic then task.wait(1.2)
+        else waitFor(function() return advance end, 1800, "Review awaiting N / next: " .. scene) end
         if case.ability == "move" then
             command(attacker, "move", { direction = Vector3.xAxis, duration = 0.8 })
             task.wait(0.5); command(attacker, "move", { direction = -Vector3.zAxis, duration = 0.8 })
@@ -89,4 +91,5 @@ if not ok then
         control:FireClient(player, 0, "failure", { label = scene })
     end
 end
+if automatic then game:GetService("StudioTestService"):EndTest({ok = ok, error = if ok then nil else tostring(problem)}) end
 script.Destroying:Connect(function() for _, c in connections do c:Disconnect() end end)

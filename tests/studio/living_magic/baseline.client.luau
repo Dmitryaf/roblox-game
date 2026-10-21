@@ -18,7 +18,7 @@ gui.Parent = player:WaitForChild("PlayerGui")
 local scene: any = nil
 local side, effects = false, true
 local hidden: { [Instance]: any } = {}
-local folders = { LocalArrowEffects = true, LocalMeleeEffects = true, LocalHeavyEffects = true, LocalHandsEffects = true, LocalDashEffects = true }
+local folders = { LocalArrowEffects = true, LocalMeleeEffects = true, LocalHeavyEffects = true, LocalHandsEffects = true, LocalDashEffects = true, LocalLivingInteractions = true }
 local connections: { RBXScriptConnection } = {}
 local function camera()
     if not scene then return end
