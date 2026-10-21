@@ -9,6 +9,7 @@ local MatchHud = require(script.Parent.presentation.MatchHud)
 local MatchController = require(script.Parent.controllers.MatchController)
 local HandsHud = require(script.Parent.presentation.HandsHud)
 local HandsEffects = require(script.Parent.presentation.HandsEffects)
+local CoverEffects = require(script.Parent.presentation.CoverEffects)
 local HandsInput = require(script.Parent.input.HandsInput)
 local HandsController = require(script.Parent.controllers.HandsController)
 local RunService = game:GetService("RunService")
@@ -49,7 +50,8 @@ assert(remote and remote:IsA("RemoteEvent"), "Combat test server did not start; 
 local gui = player:WaitForChild("PlayerGui") :: PlayerGui
 observeReaction(remote)
 local arrowEffects = Effects.new(castPose)
-local stop = Controller.start(player, remote, Hud.new(gui), arrowEffects, Input.bind)
+local experiment = ReplicatedStorage:GetAttribute("LivingMagicExperiment") == true
+local stop = Controller.start(player, remote, Hud.new(gui), arrowEffects, Input.bind, experiment)
 local stopClass: (() -> ())? = nil
 local stopMelee: (() -> ())? = nil
 local stopDash: (() -> ())? = nil
@@ -64,19 +66,20 @@ if ReplicatedStorage:GetAttribute("MatchEnabled") == true then
     assert(meleeRemote and meleeRemote:IsA("RemoteEvent"), "Melee server did not initialize")
     stopClass = ClassController.start(player, classRemote, ClassHud.new(gui))
     observeReaction(meleeRemote)
-    stopMelee = MeleeController.start(player, meleeRemote, MeleeHud.new(gui), MeleeEffects.new(warriorPose), MeleeInput.bind)
+    stopMelee = MeleeController.start(player, meleeRemote, MeleeHud.new(gui), MeleeEffects.new(warriorPose), MeleeInput.bind, nil, experiment)
     local heavyRemote = ReplicatedStorage:WaitForChild("HeavyRemote", 15)
     assert(heavyRemote and heavyRemote:IsA("RemoteEvent"), "Heavy strike server did not initialize")
     observeReaction(heavyRemote)
     stopHeavy = MeleeController.start(player, heavyRemote, HeavyHud.new(gui),
-        MeleeEffects.new(warriorPose, "heavy"), MeleeInput.bindHeavy, "heavy")
+        MeleeEffects.new(warriorPose, "heavy"), MeleeInput.bindHeavy, "heavy", experiment)
     local dashRemote = ReplicatedStorage:WaitForChild("DashRemote", 15)
     assert(dashRemote and dashRemote:IsA("RemoteEvent"), "Dash server did not initialize")
     stopDash = DashController.start(player, dashRemote, DashHud.new(gui), DashEffects.new(warriorPose), DashInput.bind)
     local handsRemote = ReplicatedStorage:WaitForChild("HandsRemote", 15)
     assert(handsRemote and handsRemote:IsA("RemoteEvent"), "Hands server did not initialize")
-    stopHands = HandsController.start(player, handsRemote, HandsHud.new(gui),
-        HandsEffects.new({ begin = arrowEffects.prepare, stop = arrowEffects.stopCast }), HandsInput.bind)
+    local handsPose = { begin = arrowEffects.prepare, stop = arrowEffects.stopCast }
+    stopHands = HandsController.start(player, handsRemote, HandsHud.new(gui, experiment),
+        if experiment then CoverEffects.new(handsPose) else HandsEffects.new(handsPose), HandsInput.bind, experiment)
 end
 local stopMatch: (() -> ())? = nil
 local matchRemote = ReplicatedStorage:WaitForChild("MatchRemote", 5)

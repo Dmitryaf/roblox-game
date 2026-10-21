@@ -15,6 +15,9 @@ function ChaosArrow.new(folder: Folder, event: any, flying: boolean)
 	local shell = Matter.part(root, "DarkMantle", Vector3.one, Style.shadow)
 	shell.Shape, shell.Transparency = Enum.PartType.Ball, 0.3
 	local light = Matter.light(root, Style.flame, 1.5, 13)
+	if event.redirected then
+		core.Color, light.Color = Color3.fromRGB(255, 218, 140), Color3.fromRGB(255, 185, 90)
+	end
 	local fire, smoke = Matter.particles(root, false), Matter.particles(root, true)
 	fire.Rate, smoke.Rate = if flying then 42 else 18, if flying then 12 else 5
 	fire.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.7), NumberSequenceKeypoint.new(0.25, 2.4), NumberSequenceKeypoint.new(1, 0.1)})

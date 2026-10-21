@@ -3,6 +3,7 @@ local RunService = game:GetService("RunService")
 local HandsController = {}
 local reasons: { [string]: string } = {
 	wrong_class = "Выберите чернокнижника, чтобы использовать заклинание.",
+	occupied = "Место плиты занято. Дождитесь, пока оно освободится.",
 	blocked = "Область здесь не поместится. Выберите другое место.",
 	invalid_target = "Укажите доступную поверхность земли.",
 	invalid_position = "Позиция уточняется. Повторите действие.",
@@ -18,7 +19,7 @@ local reasons: { [string]: string } = {
 	spawn_protected = "Покиньте стартовую площадку, чтобы атаковать.",
 }
 
-function HandsController.start(player: Player, remote: RemoteEvent, hud: any, effects: any, bind: any)
+function HandsController.start(player: Player, remote: RemoteEvent, hud: any, effects: any, bind: any, experiment: boolean?)
 	local life, requestId, readyAt = 0, 0, 0
 	local alive, suspended, synced, recovering = false, false, false, false
 	local phase = ""
@@ -76,7 +77,10 @@ function HandsController.start(player: Player, remote: RemoteEvent, hud: any, ef
 			if matchedAction then
 				pending = nil
 				if not event.ok and requestedLife == life and event.life == life then
-					note, noteUntil = reasons[event.reason] or "Действие отклонено. Выберите место и повторите.", now() + 3
+					note = if experiment and event.reason == "invalid_target" then "Наведите курсор на одну из двух зелёных отметок на арене."
+						elseif experiment and event.reason == "busy" then "Ваша плита уже действует."
+						else reasons[event.reason] or "Действие отклонено. Выберите место и повторите."
+					noteUntil = now() + 3
 				end
 			end
 			return
@@ -93,6 +97,7 @@ function HandsController.start(player: Player, remote: RemoteEvent, hud: any, ef
 				if areaId == event.areaId then
 					phase, areaId, expiresAt = "", nil, 0
 					if event.readyAt then readyAt = event.readyAt end
+					if experiment and event.reason == "occupied" then note, noteUntil = "Подъём отменён: в месте плиты оказался персонаж.", now() + 3 end
 				end
 			else
 				phase, areaId, expiresAt = event.kind, event.areaId, event.expiresAt
@@ -117,10 +122,11 @@ function HandsController.start(player: Player, remote: RemoteEvent, hud: any, ef
 		lastDraw = time
 		local status = if not synced then "Подключаемся…" else if not alive then "Ожидаем возрождения…"
 			else if suspended then "Бой приостановлен" else if recovering then "Обновляем состояние…"
-			else if pending then "Ожидаем подтверждения…" else if phase == "preparing" then "Собираем демонические руки…"
-			else if phase == "active" then string.format("Область действует · %.1f с", math.max(0, expiresAt - time))
-			else if readyAt > time then string.format("Восстановление · %.1f с", readyAt - time) else "Q — вызвать руки в точке под курсором"
-		hud.show(status, if time < noteUntil then note else "Замедление и постепенный урон в области")
+			else if pending then "Ожидаем подтверждения…" else if phase == "preparing" then (if experiment then "Руки поднимают плиту…" else "Собираем демонические руки…")
+			else if phase == "active" then string.format(if experiment then "Укрытие стоит · %.1f с" else "Область действует · %.1f с", math.max(0, expiresAt - time))
+			else if readyAt > time then string.format("Восстановление · %.1f с", readyAt - time)
+			else (if experiment then "Q — поднять плиту на зелёной отметке" else "Q — вызвать руки в точке под курсором")
+		hud.show(status, if time < noteUntil then note else if experiment then "Укрытие для обеих сторон · Стрела и тяжёлый удар разбивают плиту" else "Замедление и постепенный урон в области")
 	end)
 	hud.show("Подключаемся…", "Получаем состояние сервера…")
 	send("sync", nil)

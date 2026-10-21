@@ -4,7 +4,8 @@ type State = SwordSwing.State
 type Swing = SwordSwing.Swing
 export type Ports = { alive: (number) -> boolean, origin: (number) -> Vector3?, face: (number, Vector3) -> boolean,
     targets: (number, Vector3, number, number) -> { any }, damage: (number, any, number) -> boolean?,
-    impact: ((any) -> Vector3?)?, reaction: ((any) -> any)?, onHit: ((number, any, number) -> ())?, emit: (any) -> () }
+    impact: ((any) -> Vector3?)?, reaction: ((any) -> any)?, onHit: ((number, any, number) -> ())?,
+    onStrike: ((number, Vector3, number) -> ())?, emit: (any) -> () }
 local MeleeService = {}
 function MeleeService.new(ports: Ports, config: SwordSwing.Config, style: string?)
     local states: { [number]: State } = {}
@@ -71,6 +72,8 @@ function MeleeService.new(ports: Ports, config: SwordSwing.Config, style: string
                         ports.emit(contact)
                     end
                 end
+                -- Query/damage first: breaking a cover cannot expose someone to this same swing.
+                if state.swing == swing and state.alive and ports.onStrike then ports.onStrike(owner, swing.direction, now) end
             end
         end
     end

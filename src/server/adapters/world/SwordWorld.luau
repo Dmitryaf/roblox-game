@@ -2,6 +2,17 @@
 local SwordWorld = {}
 function SwordWorld.new(world: any)
     return {
+        visible = function(owner: number, point: Vector3): boolean
+            local origin = world.origin(owner)
+            if not origin then return false end
+            local delta = point - origin
+            if delta.Magnitude < 0.01 then return true end
+            local params = RaycastParams.new()
+            params.RespectCanCollide = true
+            local player = game:GetService("Players"):GetPlayerByUserId(owner)
+            params.FilterDescendantsInstances = if player and player.Character then { player.Character } else {}
+            return workspace:Raycast(origin, delta, params) == nil
+        end,
         impact = function(target: Humanoid): Vector3?
             local model = target.Parent
             local root = if model then model:FindFirstChild("HumanoidRootPart") else nil

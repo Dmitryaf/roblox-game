@@ -2,11 +2,14 @@
 local Arrow = require(script.Parent.Parent.Parent.domain.combat.Arrow)
 type State = Arrow.State
 type Cast = Arrow.Cast
-export type Projectile = { cast: Cast, position: Vector3?, direction: Vector3, sampledAt: number }
+export type Projectile = { cast: Cast, position: Vector3?, direction: Vector3, sampledAt: number,
+	damageOwner: number, damageLife: number, redirected: boolean }
 export type Ports = {
 	origin: (number) -> Vector3?,
 	alive: (number) -> boolean,
-	sweep: (number, Vector3, Vector3, number) -> (Vector3?, any),
+	sweep: (number, Vector3, Vector3, number) -> (Vector3?, any, any?, number?),
+	intercept: ((number, Vector3, Vector3, number, number) -> any)?,
+	coverHit: ((any, number) -> boolean)?,
 	damage: (number, any, number) -> boolean?,
 	impact: ((any) -> any)?,
 	landing: (number, Vector3, Vector3) -> Vector3?,
@@ -36,20 +39,28 @@ function ArrowService.new(ports: Ports, config: Config)
 		local ended = remove(owner, reason, position)
 		if ended then ports.emit(ended) end
 	end
+	local function cancelRedirects(owner: number)
+		for caster, projectile in projectiles do
+			if projectile.redirected and projectile.damageOwner == owner then finish(caster, "interceptor_reset", nil) end
+		end
+	end
 
 	function service.join(owner: number, life: number)
+		cancelRedirects(owner)
 		finish(owner, "reset", nil)
 		paused[owner] = nil
 		states[owner] = Arrow.new(life)
 	end
 
 	function service.leave(owner: number)
+		cancelRedirects(owner)
 		finish(owner, "left", nil)
 		states[owner] = nil
 		paused[owner] = nil
 	end
 	function service.pause(owner: number, now: number)
 		if paused[owner] then return end
+		cancelRedirects(owner)
 		finish(owner, "paused", nil)
 		paused[owner] = now
 	end
@@ -62,6 +73,7 @@ function ArrowService.new(ports: Ports, config: Config)
 	end
 
 	function service.die(owner: number)
+		cancelRedirects(owner)
 		finish(owner, "dead", nil)
 		if states[owner] then Arrow.die(states[owner]) end
 	end
@@ -72,6 +84,9 @@ function ArrowService.new(ports: Ports, config: Config)
 			if not ports.alive(owner) then
 				service.die(owner)
 				continue
+			end
+			if projectile.redirected and not ports.alive(projectile.damageOwner) then
+				finish(owner, "interceptor_reset", nil); continue
 			end
 			if now < cast.launchAt then continue end
 			if not projectile.position then
@@ -85,27 +100,52 @@ function ArrowService.new(ports: Ports, config: Config)
 			end
 			local position = projectile.position :: Vector3
 			local untilTime = math.min(now, cast.expiresAt)
-			local distance = math.max(0, untilTime - projectile.sampledAt) * config.speed
-			if distance > 0 then
+			-- At most two segments: the original path, then its single redirected remainder.
+			for _ = 1, 2 do
+				if projectiles[owner] ~= projectile then break end
+				position = projectile.position :: Vector3
+				local distance = math.max(0, untilTime - projectile.sampledAt) * config.speed
+				if distance <= 0 then break end
 				local delta = projectile.direction * distance
-				local hit, target = ports.sweep(owner, position, delta, config.radius)
+				local hit, target, surface, hitDistance = ports.sweep(projectile.damageOwner, position, delta, config.radius)
+				local contactDistance = hitDistance or (if hit then (hit - position).Magnitude else math.huge)
 				local sampledAt = projectile.sampledAt
+				local redirect = if not projectile.redirected and ports.intercept
+					then ports.intercept(owner, position, delta, sampledAt, untilTime) else nil
+				local defender = if redirect then states[redirect.owner] else nil
+				if redirect and defender and defender.alive and defender.life == redirect.life
+					and paused[redirect.owner] == nil and ports.alive(redirect.owner)
+					and (not hit or redirect.fraction * distance < contactDistance) then
+					projectile.position = position + delta * redirect.fraction
+					projectile.sampledAt = sampledAt + (untilTime - sampledAt) * redirect.fraction
+					projectile.direction, projectile.redirected = redirect.direction, true
+					projectile.damageOwner, projectile.damageLife = redirect.owner, redirect.life
+					ports.emit({ kind = "redirected", owner = owner, life = cast.life, castId = cast.id,
+						damageOwner = redirect.owner, damageLife = redirect.life, redirected = true,
+						position = projectile.position, direction = projectile.direction, speed = config.speed,
+						sampledAt = projectile.sampledAt, launchAt = cast.launchAt, expiresAt = cast.expiresAt })
+					continue
+				end
 				projectile.sampledAt = untilTime
 				if hit then
 					-- Remove before damage: death callbacks and repeats cannot apply this hit again.
 					local ended = remove(owner, "hit", hit)
 					if ended then
 						ended.sourcePosition = position
-						ended.contactAt = sampledAt + math.clamp((hit - position).Magnitude / config.speed, 0, untilTime - sampledAt)
-						local damaged = if target then ports.damage(owner, target, config.damage) else nil
+						ended.contactAt = sampledAt + math.clamp(contactDistance / config.speed, 0, untilTime - sampledAt)
+						ended.damageOwner = projectile.damageOwner
+						local cover = surface ~= nil and ports.coverHit ~= nil and ports.coverHit(surface, untilTime)
+						if cover then ended.reason = "cover_broken" end
+						local damaged = if target and not cover then ports.damage(projectile.damageOwner, target, config.damage) else nil
 						ended.damageApplied = damaged == true
 						local impact = if damaged == true and ports.impact then ports.impact(target) else nil
 						if impact then ended.targetModel, ended.targetLife = impact.targetModel, impact.targetLife end
 						ports.emit(ended)
 					end
-					continue
+					break
 				end
 				projectile.position = position + delta
+				break
 			end
 			if now >= cast.expiresAt then finish(owner, "expired", projectile.position) end
 		end
@@ -122,7 +162,8 @@ function ArrowService.new(ports: Ports, config: Config)
 		local cast, reason = Arrow.begin(state, owner, life, sequence, now, config.windup, config.lifetime, config.cooldown)
 		if not cast then return false, reason end
 		cast.requestId = requestId
-		projectiles[owner] = { cast = cast, position = nil, direction = direction, sampledAt = cast.launchAt }
+		projectiles[owner] = { cast = cast, position = nil, direction = direction, sampledAt = cast.launchAt,
+			damageOwner = owner, damageLife = life, redirected = false }
 		ports.emit({ kind = "preparing", owner = owner, life = life, castId = cast.id,
 			requestId = requestId, direction = direction, startedAt = now, launchAt = cast.launchAt, expiresAt = cast.expiresAt, readyAt = state.readyAt })
 		return true, nil
@@ -173,6 +214,7 @@ function ArrowService.new(ports: Ports, config: Config)
 		for id, projectile in projectiles do
 			local cast = projectile.cast
 			table.insert(active, { kind = cast.phase, owner = id, life = cast.life, castId = cast.id, requestId = cast.requestId,
+				damageOwner = projectile.damageOwner, damageLife = projectile.damageLife, redirected = projectile.redirected,
 				position = projectile.position, direction = projectile.direction, speed = config.speed,
 				startedAt = cast.launchAt - config.windup, launchAt = cast.launchAt, expiresAt = cast.expiresAt, sampledAt = projectile.sampledAt })
 		end

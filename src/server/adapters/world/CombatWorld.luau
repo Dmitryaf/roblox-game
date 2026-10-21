@@ -137,9 +137,9 @@ function CombatWorld.new(spawns: { CFrame }?, policy: Policy?)
 		return bodies[owner].trusted.Position + Vector3.new(0, 1, 0)
 	end
 
-	function world.sweep(owner: number, position: Vector3, delta: Vector3, radius: number): (Vector3?, Humanoid?)
+	function world.sweep(owner: number, position: Vector3, delta: Vector3, radius: number): (Vector3?, Humanoid?, Instance?, number?)
 		local b = bodies[owner]
-		if not b then return position, nil end
+		if not b then return position, nil, nil, 0 end
 		local p = params(b.character)
 		p.RespectCanCollide = false -- Humanoid parts can be queryable without being collidable.
 		local overlap = OverlapParams.new()
@@ -148,14 +148,15 @@ function CombatWorld.new(spawns: { CFrame }?, policy: Policy?)
 		local initial = workspace:GetPartBoundsInRadius(position, radius, overlap)
 		local hit = workspace:Spherecast(position, radius, delta, p)
 		local barrier = if policy then policy.barrier(owner, position, delta) else nil
-		if barrier and (not hit or (barrier - position).Magnitude <= (hit.Position - position).Magnitude) and #initial == 0 then
-			return barrier, nil
+		if barrier and (not hit or (barrier - position).Magnitude <= hit.Distance) and #initial == 0 then
+			return barrier, nil, nil, (barrier - position).Magnitude
 		end
 		local instance = if #initial > 0 then initial[1] else if hit then hit.Instance else nil
-		if not instance then return nil, nil end
+		if not instance then return nil, nil, nil, nil end
 		local model = instance:FindFirstAncestorOfClass("Model")
 		local humanoid = if model then model:FindFirstChildOfClass("Humanoid") else nil
-		return if #initial > 0 then position else (hit :: RaycastResult).Position, humanoid
+		return if #initial > 0 then position else (hit :: RaycastResult).Position, humanoid, instance,
+			if #initial > 0 then 0 else (hit :: RaycastResult).Distance
 	end
 
 	function world.damage(owner: number, target: Humanoid, amount: number): boolean

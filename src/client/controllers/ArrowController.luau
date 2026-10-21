@@ -14,7 +14,7 @@ local reasons = {
 	paused = "Бой приостановлен. Дождитесь начала или возобновления.",
 	spawn_protected = "Покиньте стартовую площадку, чтобы атаковать.",
 }
-function ArrowController.start(player: Player, remote: RemoteEvent, hud: any, effects: any, bind: any)
+function ArrowController.start(player: Player, remote: RemoteEvent, hud: any, effects: any, bind: any, experiment: boolean?)
 	local life, requestId, readyAt = 0, 0, 0
 	local alive, phase, castId = false, "", nil :: number?
 	local pending: { id: number, at: number, action: string }? = nil
@@ -82,7 +82,10 @@ function ArrowController.start(player: Player, remote: RemoteEvent, hud: any, ef
 				if castId == e.castId then phase, castId = "", nil end
 				if e.reason == "invalid_position" then note, noteUntil = reasons.invalid_position, now() + 2.5 end
 			else
-				phase, castId = if e.kind == "launched" then "flying" else e.kind, e.castId
+				phase, castId = if e.kind == "launched" or e.kind == "redirected" then "flying" else e.kind, e.castId
+				if e.kind == "redirected" then
+					note, noteUntil = "Стрела перехвачена! E — переместиться и погасить её.", now() + 3
+				end
 				if e.readyAt then readyAt = e.readyAt end
 			end
 		else
@@ -96,7 +99,7 @@ function ArrowController.start(player: Player, remote: RemoteEvent, hud: any, ef
 	end, function()
 		if phase == "flying" and castId then send("teleport", nil) end
 	end, function()
-        if phase == "flying" and castId then send("transfer", nil) end
+        if not experiment and phase == "flying" and castId then send("transfer", nil) end
     end)
 	local frame = RunService.RenderStepped:Connect(function()
 		local time = now()
@@ -110,9 +113,9 @@ function ArrowController.start(player: Player, remote: RemoteEvent, hud: any, ef
 		end
 		local status = if not synced then "Подключаемся…" else if not alive then "Возрождение через несколько секунд…"
 			else if suspended then "Бой приостановлен" else if pending then "Ожидаем подтверждения…" else if phase == "preparing" then "Подготовка стрелы…"
-			else if phase == "flying" then "E — телепортация · F — перенести активные руки"
+			else if phase == "flying" then (if experiment then "E — переместиться к стреле и погасить её" else "E — телепортация · F — перенести активные руки")
 			else if readyAt > time then string.format("Восстановление · %.1f с", readyAt - time) else "ЛКМ — выпустить стрелу"
-		hud.show(status, if time < noteUntil then note else "WASD — движение · Мышь — прицел · E — телепортация · Q → ЛКМ → F — перенос рук")
+		hud.show(status, if time < noteUntil then note else if experiment then "Воин может отбить стрелу · E остаётся у создателя · Q — укрытие" else "WASD — движение · Мышь — прицел · E — телепортация · Q → ЛКМ → F — перенос рук")
 	end)
 	send("sync", nil)
 	return function()

@@ -209,4 +209,17 @@ test("real melee and heavy crescents cover the configured range and 100 degree a
 	end
 end)
 
+test("redirect replaces flight visual once and stale launch cannot undo it", function()
+	local f = fixture(); f.controller()
+	local launch = f.event(1, 7, 1, "launched"); f.messages.fire(launch)
+	local redirect = table.clone(launch); redirect.kind, redirect.redirected, redirect.damageOwner = "redirected", true, 2
+	redirect.position, redirect.direction, redirect.sampledAt = V.new(10, 3, -20), -forward, 101
+	f.messages.fire(redirect)
+	assert(#f.visuals == 2 and f.visuals[1].destroyed and f.visuals[2].flying)
+	f.messages.fire(redirect); f.messages.fire(launch)
+	assert(#f.visuals == 2 and not f.visuals[2].destroyed)
+	f.teleport(); assert(f.sent[#f.sent].action == "teleport" and f.sent[#f.sent].castId == 1)
+	f.destroy()
+end)
+
 print(string.format("%d arrow life/visual geometry boundary tests passed", total))

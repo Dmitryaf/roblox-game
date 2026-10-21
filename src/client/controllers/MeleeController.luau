@@ -13,7 +13,7 @@ local reasons: { [string]: string } = {
 	invalid_position = "Позиция уточняется. Повторите удар.",
 	invalid_aim = "Укажите направление удара курсором.",
 }
-function MeleeController.start(player: Player, remote: RemoteEvent, hud: any, effects: any, bind: any, style: string?)
+function MeleeController.start(player: Player, remote: RemoteEvent, hud: any, effects: any, bind: any, style: string?, experiment: boolean?)
 	local heavy = style == "heavy"
 	local life, requestId, readyAt = 0, 0, 0
 	local alive, suspended, synced, recovering = false, false, false, false
@@ -122,7 +122,8 @@ function MeleeController.start(player: Player, remote: RemoteEvent, hud: any, ef
 			else if phase == "struck" then "Возвращаем меч в стойку…"
 			else if readyAt > time then string.format("Восстановление · %.1f с", readyAt - time) else (if heavy then "Q — тяжёлый удар в направлении курсора" else "ЛКМ — взмах мечом в направлении курсора")
 		hud.show(status, if time < noteUntil then note else
-            if heavy then "Попадание замедляет на 2 с · Можно увернуться" else "WASD — движение · ЛКМ — взмах · E — рывок · Q — тяжёлый удар")
+            if heavy then (if experiment then "Разбивает поднятую плиту · Попадание замедляет на 2 с" else "Попадание замедляет на 2 с · Можно увернуться")
+            else (if experiment then "Взмах один раз отбивает стрелу в сторону прицела · E — рывок" else "WASD — движение · ЛКМ — взмах · E — рывок · Q — тяжёлый удар"))
 	end)
 	hud.show("Подключаемся…", "Получаем состояние сервера…")
 	send("sync", nil)

@@ -69,7 +69,8 @@ function ArrowEffects.new(sharedPose: any?)
 	local function deferVisual(event: any, quiet: boolean?)
 		local now = workspace:GetServerTimeNow()
 		local old = pending[event.castId]
-		if old and (old.event.kind == "launched" or old.event.kind == "flying") and event.kind == "preparing" then return end
+		if old and old.event.redirected and not event.redirected then return end
+		if old and (old.event.kind == "launched" or old.event.kind == "flying" or old.event.kind == "redirected") and event.kind == "preparing" then return end
 		local count, oldestId, oldestAt = 0, nil, math.huge
 		for id, entry in pending do count += 1; if entry.at < oldestAt then oldestId, oldestAt = id, entry.at end end
 		if not old and count >= 24 and oldestId then pending[oldestId] = nil end
@@ -119,10 +120,11 @@ function ArrowEffects.new(sharedPose: any?)
 		if status == "stale" then pending[id] = nil; return end
 		if not character then deferVisual(event, quiet); return end
 		pending[id] = nil
-		local flying = event.kind == "launched" or event.kind == "flying"
+		local flying = event.kind == "launched" or event.kind == "flying" or event.kind == "redirected"
 		local old = active[id]
 		if old and old.flying and not flying then return end
-		if old and old.flying == flying then return end
+		if old and old.event.redirected and not event.redirected then return end
+		if old and old.flying == flying and old.event.redirected == event.redirected then return end
 		remove(id)
 		local visual = ChaosArrow.new(folder, event, flying)
 		active[id] = {visual = visual, event = event, flying = flying, character = character}
