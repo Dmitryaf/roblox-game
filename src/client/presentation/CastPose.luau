@@ -5,8 +5,9 @@ local RunService = game:GetService("RunService")
 local CastPose = {}
 type AnimationJoint = Motor6D | AnimationConstraint
 type Joint = { motor: AnimationJoint, rest: CFrame, raised: Vector3, charge: Vector3, focus: Vector3, release: Vector3,
-	breath: Vector3, aimFocus: Vector3, aimRelease: Vector3, lastBase: CFrame?, lastApplied: CFrame? }
-type Pose = { character: Model, joints: { Joint }, started: number, release: number, life: any, preview: boolean?, requestId: number?, timeline: any?, native: any? }
+	breath: Vector3, aimFocus: Vector3, aimRelease: Vector3, name: string, lower: boolean?, support: boolean?, lastBase: CFrame?, lastApplied: CFrame? }
+type Pose = { character: Model, joints: { Joint }, started: number, release: number, life: any, preview: boolean?, requestId: number?, timeline: any?, native: any?,
+    facing: any?, direction: Vector3?, lowerWeight: number?, lastFrame: number? }
 local RELEASE = 0.05
 local RECOVERY = 0.4
 local function radians(x: number, y: number, z: number): Vector3 return Vector3.new(math.rad(x), math.rad(y), math.rad(z)) end
@@ -17,6 +18,8 @@ end
 function CastPose.new(clock: (() -> number)?, manualFrames: boolean?, clips: Instance?)
     local Native: any = if clips then require(script.Parent.NativePoseSampler) else nil
     local NativeTiming: any = if clips then require(script.Parent.NativePoseTiming) else nil
+    local NativeLocomotion: any = if clips then require(script.Parent.NativePoseLocomotion) else nil
+    local Facing: any = if clips then require(script.Parent.MeleeFacing) else nil
 	local readClock = clock or function(): number return workspace:GetServerTimeNow() end
 	local poses: { [number]: Pose } = {}
 	local pose = {}
@@ -24,6 +27,7 @@ function CastPose.new(clock: (() -> number)?, manualFrames: boolean?, clips: Ins
 		local current = poses[owner]
 		if current then
 			if current.native then current.native.destroy() end
+            if current.facing then current.facing.destroy() end
 			for _, joint in current.joints do
 				-- Animator may have written a new pose since our last update. Preserve that value.
 				if joint.motor.Parent and joint.lastApplied and joint.motor.Transform == joint.lastApplied and joint.lastBase then
@@ -38,6 +42,7 @@ function CastPose.new(clock: (() -> number)?, manualFrames: boolean?, clips: Ins
         if current and current.preview and current.requestId == requestId then
             current.timeline.confirm(readClock(), release)
             current.started, current.release, current.preview = startedAt or current.started, release, false
+            current.direction = direction or current.direction
             return
         end
 		pose.stop(owner)
@@ -54,7 +59,7 @@ function CastPose.new(clock: (() -> number)?, manualFrames: boolean?, clips: Ins
 		end
 		local joints: { Joint } = {}
 		local descendants = character:GetDescendants()
-		local function add(names: { string }, raised: Vector3, charge: Vector3, released: Vector3, focus: Vector3?, breath: Vector3?)
+		local function add(names: { string }, raised: Vector3, charge: Vector3, released: Vector3, focus: Vector3?, breath: Vector3?, lower: boolean?, support: boolean?)
 			local aimFocus = if names[1] == "Waist" then Vector3.new(0, yaw * 0.25, 0)
 				else if names[1] == "Neck" then Vector3.new(pitch * 0.55, yaw * 0.65, 0) else Vector3.zero
 			local aimRelease = if names[1] == "Neck" then aimFocus
@@ -67,7 +72,7 @@ function CastPose.new(clock: (() -> number)?, manualFrames: boolean?, clips: Ins
 					-- The attachment frame is the upgraded rig's read-only equivalent of C0.
 					local rest = if candidate:IsA("Motor6D") then candidate.C0.Rotation else if attachment then attachment.CFrame.Rotation else CFrame.identity
 					table.insert(joints, { motor = candidate, rest = rest, raised = raised, charge = charge, focus = focus or charge,
-						release = released, breath = breath or Vector3.zero, aimFocus = aimFocus, aimRelease = aimRelease })
+						release = released, breath = breath or Vector3.zero, aimFocus = aimFocus, aimRelease = aimRelease, name = names[1], lower = lower, support = support })
 					return
 				end
 			end
@@ -86,9 +91,27 @@ function CastPose.new(clock: (() -> number)?, manualFrames: boolean?, clips: Ins
 		add({ "LeftElbow" }, radians(58, 0, 0), radians(92, 0, 0), radians(48, 0, 0))
 		add({ "RightWrist" }, radians(-8, 0, 6), radians(-16, -8, 12), radians(17, 0, -5))
 		add({ "LeftWrist" }, radians(-8, 0, -6), radians(-16, 8, -12), radians(-4, 0, -6))
-		poses[owner] = { character = character, joints = joints, started = math.min(startedAt or readClock(), release - 0.06), release = release, life = character:GetAttribute("CombatLife") }
+		poses[owner] = { character = character, joints = joints, started = math.min(startedAt or readClock(), release - 0.06), release = release, life = character:GetAttribute("CombatLife"), direction = direction }
 		local clip = if clips then clips:FindFirstChild("WarlockCast") else nil
-		if clip and clip:IsA("AnimationClip") then poses[owner].native = Native.new(character, clip) end
+		if clip and clip:IsA("AnimationClip") then
+			local created = poses[owner]
+			created.native = Native.new(character, clip)
+			if created.native then
+                local waistFound = false
+                for index = #joints, 1, -1 do
+                    local joint = joints[index]
+                    if joint.name ~= "Waist" then continue end
+                    local attachment = if joint.motor:IsA("AnimationConstraint") then joint.motor.Attachment0 else nil
+                    if joint.motor.Name == "RootJoint" or (attachment and attachment.Name == "RootRigAttachment") then table.remove(joints, index)
+                    else waistFound = true end
+                end
+                if not waistFound then add({"Waist"}, Vector3.zero, Vector3.zero, Vector3.zero) end
+                for _, name in NativeLocomotion.joints do add({name}, Vector3.zero, Vector3.zero, Vector3.zero, nil, nil, true) end
+                add({"Root", "RootJoint"}, Vector3.zero, Vector3.zero, Vector3.zero, nil, nil, true, true)
+                created.lowerWeight, created.lastFrame = 0, readClock()
+                if player == Players.LocalPlayer and direction then created.facing = Facing.new(character, direction) end
+            end
+        end
 	end
     function pose.preview(owner: number, requestId: number, life: number, direction: Vector3): boolean
         if poses[owner] then return false end
@@ -138,11 +161,32 @@ function CastPose.new(clock: (() -> number)?, manualFrames: boolean?, clips: Ins
             end
         end
     end
-    function pose.afterPose(now: number)
+    function pose.afterPose(now: number, delta: number?)
 
 		pose.step(now)
 		for _, current in poses do
 			if current.native then current.native.capture() end
+            if current.native then
+                local frameDelta = delta or math.max(0, now - (current.lastFrame or now))
+                current.lastFrame = now
+                if current.facing then current.facing.step(now, current.release, frameDelta) end
+                local humanoid = current.character:FindFirstChildOfClass("Humanoid")
+                local root = current.character:FindFirstChild("HumanoidRootPart")
+                if humanoid and root and root:IsA("BasePart") then
+                    current.lowerWeight = NativeLocomotion.weight(humanoid, root, current.lowerWeight or 0, frameDelta)
+                    if current.direction and current.direction.Magnitude > 0.1 then
+                        local aim = root.CFrame:VectorToObjectSpace(current.direction.Unit)
+                        local pitch = math.clamp(math.asin(math.clamp(aim.Y, -1, 1)), -0.4, 0.6)
+                        local yaw = math.clamp(math.atan2(-aim.X, -aim.Z), -0.5, 0.5)
+                        for _, joint in current.joints do
+                            joint.aimFocus = if joint.name == "Waist" then Vector3.new(0, yaw * 0.25, 0)
+                                else if joint.name == "Neck" then Vector3.new(pitch * 0.55, yaw * 0.65, 0) else Vector3.zero
+                            joint.aimRelease = if joint.name == "Neck" then joint.aimFocus
+                                else if joint.name == "RightShoulder" then Vector3.new(pitch, yaw, 0) else Vector3.zero
+                        end
+                    end
+                end
+            end
 			local preparing = now < current.release
 			local progress = if current.timeline and preparing then current.timeline.progress(now)
                 else math.clamp((now - current.started) / math.max(0.06, current.release - current.started), 0, 1)
@@ -161,13 +205,18 @@ function CastPose.new(clock: (() -> number)?, manualFrames: boolean?, clips: Ins
 				local base = joint.motor.Transform
 				-- Unanimated joints retain our previous value; remove that overlay before applying the next.
 				if joint.lastApplied and base == joint.lastApplied and joint.lastBase then base = joint.lastBase end
+                if joint.lower and (current.lowerWeight or 0) == 0 then
+                    setTransform(joint.motor, base); joint.lastBase, joint.lastApplied = base, nil
+                    continue
+                end
 				local parentRotation = CFrame.Angles(angles.X, angles.Y, angles.Z)
-				local localRotation = if current.native then current.native.sample(joint.motor) or CFrame.identity
+				local localRotation = if current.native then (if joint.support then current.native.support(joint.motor) else current.native.sample(joint.motor)) or CFrame.identity
 					else joint.rest:Inverse() * parentRotation * joint.rest
 				if current.native then
 					local aim = if preparing then joint.aimFocus * focus
 						else joint.aimFocus:Lerp(joint.aimRelease, snap) * recovery
 					localRotation = joint.rest:Inverse() * CFrame.Angles(aim.X, aim.Y, aim.Z) * joint.rest * localRotation
+                    if joint.lower then localRotation = CFrame.identity:Lerp(localRotation, current.lowerWeight or 0) end
 				end
 				setTransform(joint.motor, localRotation * base)
 				joint.lastBase, joint.lastApplied = base, joint.motor.Transform
@@ -179,7 +228,7 @@ function CastPose.new(clock: (() -> number)?, manualFrames: boolean?, clips: Ins
     if not manualFrames then animation = RunService.PreAnimation:Connect(function()
         pose.beforePose(); pose.preparePose(readClock())
     end) end
-    if not manualFrames then simulation = RunService.PreSimulation:Connect(function() pose.afterPose(readClock()) end) end
+    if not manualFrames then simulation = RunService.PreSimulation:Connect(function(delta: number) pose.afterPose(readClock(), delta) end) end
 	function pose.destroy()
         if animation then animation:Disconnect() end
         if simulation then simulation:Disconnect() end

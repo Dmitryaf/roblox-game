@@ -2,8 +2,8 @@
 -- Studio-only native evaluation, isolated from the replicated character Animator.
 local Sampler = {}
 type Joint = Motor6D | AnimationConstraint
-type Pair = { source: Joint, copy: Joint, neutral: CFrame?, delta: CFrame? }
-type Handle = { prepare: (number) -> (), capture: () -> (), sample: (Joint) -> CFrame?, destroy: () -> () }
+type Pair = { source: Joint, copy: Joint, neutral: CFrame?, delta: CFrame?, support: boolean? }
+type Handle = { prepare: (number) -> (), capture: () -> (), sample: (Joint) -> CFrame?, support: (Joint) -> CFrame?, destroy: () -> () }
 local registered: { [AnimationClip]: string } = {}
 local bodyParts: { [string]: boolean } = {
     HumanoidRootPart = true, Head = true, UpperTorso = true, LowerTorso = true,
@@ -12,9 +12,11 @@ local bodyParts: { [string]: boolean } = {
     LeftUpperLeg = true, LeftLowerLeg = true, LeftFoot = true,
     RightUpperLeg = true, RightLowerLeg = true, RightFoot = true,
 }
-local upperBody: { [string]: boolean } = {
+local sampledBody: { [string]: boolean } = {
     Waist = true, Neck = true, LeftShoulder = true, RightShoulder = true,
     LeftElbow = true, RightElbow = true, LeftWrist = true, RightWrist = true,
+    LeftHip = true, RightHip = true, LeftKnee = true, RightKnee = true,
+    LeftAnkle = true, RightAnkle = true,
 }
 local function jointName(joint: Joint): string
     if joint:IsA("AnimationConstraint") and joint.Attachment0 then
@@ -73,7 +75,9 @@ function Sampler.new(character: Model, clip: AnimationClip): Handle?
                 assert(copy0 and copy0:IsA("BasePart") and copy1 and copy1:IsA("BasePart"), "Joint leaves sampler skeleton")
                 copy.Part0, copy.Part1 = copy0, copy1
                 reset(copy)
-                if upperBody[jointName(original)] then pairs[original] = { source = original, copy = copy } end
+                local name = jointName(original)
+                local support = name == "Root" or name == "RootJoint"
+                if sampledBody[name] or support then pairs[original] = { source = original, copy = copy, support = support } end
             elseif copy:IsA("AnimationConstraint") and original:IsA("AnimationConstraint") then
                 local attachment0, attachment1 = original.Attachment0, original.Attachment1
                 assert(attachment0 and attachment1, "Missing constraint attachments")
@@ -81,10 +85,12 @@ function Sampler.new(character: Model, clip: AnimationClip): Handle?
                 assert(copy0 and copy0:IsA("Attachment") and copy1 and copy1:IsA("Attachment"), "Constraint leaves sampler skeleton")
                 copy.Attachment0, copy.Attachment1 = copy0, copy1
                 reset(copy)
-                if upperBody[jointName(original)] then pairs[original] = { source = original, copy = copy } end
+                local name = jointName(original)
+                local support = name == "Root" or name == "RootJoint"
+                if sampledBody[name] or support then pairs[original] = { source = original, copy = copy, support = support } end
             end
         end
-        assert(next(pairs), "No upper body joints")
+        assert(next(pairs), "No sampled body joints")
         local controller = Instance.new("AnimationController")
         controller.Parent = rig
         local nativeAnimator = Instance.new("Animator")
@@ -129,7 +135,19 @@ function Sampler.new(character: Model, clip: AnimationClip): Handle?
     function sampler.sample(joint: Joint): CFrame?
         if stopped or not neutralReady then return nil end
         local pair = pairs[joint]
-        return if pair then pair.delta else nil
+        return if pair and not pair.support then pair.delta else nil
+    end
+    function sampler.support(joint: Joint): CFrame?
+        if stopped or not neutralReady then return nil end
+        local pair = pairs[joint]
+        if not pair or not pair.support or not pair.delta then return nil end
+        -- The visual LowerTorso may settle with authored bent knees. This is
+        -- bounded translation on the rig joint, never physical HRP root motion.
+        local position = pair.delta.Position
+        for _, value in {position.X, position.Y, position.Z} do
+            if value ~= value or math.abs(value) == math.huge then return nil end
+        end
+        return CFrame.new(math.clamp(position.X, -0.15, 0.15), math.clamp(position.Y, -0.5, 0.1), math.clamp(position.Z, -0.15, 0.15))
     end
     function sampler.destroy()
         if stopped then return end

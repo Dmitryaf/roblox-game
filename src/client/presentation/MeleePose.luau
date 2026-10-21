@@ -7,9 +7,9 @@ local Facing = require(script.Parent.MeleeFacing)
 local HeavyMotion: any = nil
 local MeleePose = {}
 type Motor = Motor6D | AnimationConstraint
-type Joint = { motor: Motor, rest: CFrame, keys: { Vector3 }, body: boolean, torso: boolean, base: CFrame?, applied: CFrame? }
+type Joint = { motor: Motor, rest: CFrame, keys: { Vector3 }, body: boolean, torso: boolean, lower: boolean?, support: boolean?, base: CFrame?, applied: CFrame? }
 type Swing = { character: Model, humanoid: Humanoid, root: BasePart?, joints: { Joint }, started: number,
-    hitAt: number, expires: number, received: number, direction: Vector3?, facing: any, kind: string, id: number?, life: any, timeline: any?, preview: boolean?, requestId: number?, dashLead: number?, native: any? }
+    hitAt: number, expires: number, received: number, direction: Vector3?, facing: any, kind: string, id: number?, life: any, timeline: any?, preview: boolean?, requestId: number?, dashLead: number?, native: any?, lowerWeight: number? }
 local function transform(motor: Motor, value: CFrame)
     if motor:IsA("Motor6D") then motor.Transform = value else (motor :: AnimationConstraint).Transform = value end
 end
@@ -22,6 +22,7 @@ end
 function MeleePose.new(manualFrames: boolean?, clips: Instance?)
     local Native: any = if clips then require(script.Parent.NativePoseSampler) else nil
     local NativeTiming: any = if clips then require(script.Parent.NativePoseTiming) else nil
+    local NativeLocomotion: any = if clips then require(script.Parent.NativePoseLocomotion) else nil
     local swings: { [number]: Swing } = {}
     local pose = {}
     function pose.stop(owner: number, expectedKind: string?, expectedId: number?)
@@ -34,7 +35,7 @@ function MeleePose.new(manualFrames: boolean?, clips: Instance?)
         if swing.native then swing.native.destroy() end
         swings[owner] = nil
     end
-    local function collect(character: Model, channels: any): { Joint }
+    local function collect(character: Model, channels: any, nativeBody: boolean?): { Joint }
         local joints: { Joint } = {}
         local descendants = character:GetDescendants()
         for _, channel in channels do
@@ -43,10 +44,11 @@ function MeleePose.new(manualFrames: boolean?, clips: Instance?)
                 if not candidate:IsA("Motor6D") and not candidate:IsA("AnimationConstraint") then continue end
                 local attachment = if candidate:IsA("AnimationConstraint") then candidate.Attachment0 else nil
                 for _, name in channel.names do
+                    if nativeBody and channel.names[1] == "Waist" and name == "RootJoint" then continue end
                     if candidate.Name ~= name and not (attachment and attachment.Name == name .. "RigAttachment") then continue end
                     local rest = if candidate:IsA("Motor6D") then candidate.C0.Rotation else if attachment then attachment.CFrame.Rotation else CFrame.identity
                     table.insert(joints, { motor = candidate, rest = rest, keys = channel.keys, body = channel.body,
-                        torso = channel.names[1] == "Waist" })
+                        torso = channel.names[1] == "Waist", lower = channel.lower == true, support = channel.support == true })
                     found = true
                     break
                 end
@@ -77,7 +79,21 @@ function MeleePose.new(manualFrames: boolean?, clips: Instance?)
             received = workspace:GetServerTimeNow(), kind = "melee", id = swingId, life = character:GetAttribute("CombatLife"),
             facing = if player == Players.LocalPlayer and direction then Facing.new(character, direction) else nil }
         local clip = if clips then clips:FindFirstChild("WarriorStrike") else nil
-        if clip and clip:IsA("AnimationClip") then swings[owner].native = Native.new(character, clip) end
+        if clip and clip:IsA("AnimationClip") then
+            local swing = swings[owner]
+            swing.native = Native.new(character, clip)
+            if swing.native then
+                -- R15's visual RootJoint is not the R6 fallback for Waist here.
+                swing.joints = collect(character, Motion.channels, true)
+                local channels = {}
+                for _, name in NativeLocomotion.joints do
+                    table.insert(channels, { names = { name }, body = true, lower = true, keys = { Vector3.zero } })
+                end
+                table.insert(channels, { names = { "Root", "RootJoint" }, body = true, lower = true, support = true, keys = { Vector3.zero } })
+                for _, joint in collect(character, channels) do table.insert(swing.joints, joint) end
+                swing.lowerWeight = 0
+            end
+        end
     end
     function pose.beginDash(owner: number, duration: number, direction: Vector3, dashId: number, requestId: number?)
         local current = swings[owner]
@@ -182,6 +198,7 @@ function MeleePose.new(manualFrames: boolean?, clips: Instance?)
         pose.step(now)
         for _, swing in swings do
             if swing.native then swing.native.capture() end
+            if swing.native then swing.lowerWeight = NativeLocomotion.weight(swing.humanoid, swing.root, swing.lowerWeight or 0, delta) end
             if swing.facing then swing.facing.step(now, swing.hitAt, delta) end
             local isDash = swing.kind == "dash"
             local isHeavy = swing.kind == "heavy"
@@ -210,17 +227,20 @@ function MeleePose.new(manualFrames: boolean?, clips: Instance?)
                 if not joint.motor.Parent then continue end
                 -- PreAnimation normally restores us; this also covers throttled Animator frames.
                 restore(joint)
+                if joint.lower and (swing.lowerWeight or 0) == 0 then continue end
                 local base = joint.motor.Transform
-                local angles = if isDash then DashMotion.sample(joint.keys, time)
+                local angles = if swing.native then Vector3.zero else if isDash then DashMotion.sample(joint.keys, time)
                     else if isHeavy then HeavyMotion.sample(joint.keys, time) else Motion.sample(joint.keys, time)
                 if isDash and joint.torso and swing.root and swing.direction then
                     local localDirection = swing.root.CFrame:VectorToObjectSpace(swing.direction)
                     angles = Vector3.new(localDirection.Z * math.abs(angles.X), angles.Y, angles.Z - localDirection.X * math.abs(angles.X) * 0.7)
                 end
-                local rotation = if swing.native then swing.native.sample(joint.motor) or CFrame.identity
+                local rotation = if swing.native then (if joint.support then swing.native.support(joint.motor) else swing.native.sample(joint.motor)) or CFrame.identity
                     else joint.rest:Inverse() * CFrame.Angles(angles.X, angles.Y, angles.Z) * joint.rest
                 local target: CFrame
-                if joint.body then
+                if joint.lower then
+                    target = CFrame.identity:Lerp(rotation, swing.lowerWeight or 0) * base
+                elseif joint.body then
                     local amplitude = if running and not isDash then (if isHeavy then 0.75 else 0.5) else 1
                     target = CFrame.identity:Lerp(rotation, amplitude) * base
                     if not isDash and (joint.motor.Name == "Waist" or joint.motor.Name == "RootJoint") then

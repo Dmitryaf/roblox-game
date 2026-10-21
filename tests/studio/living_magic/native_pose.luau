@@ -15,6 +15,12 @@ local function angle(value: CFrame): number
     local _, radians = value:ToAxisAngle()
     return math.abs(radians)
 end
+local function finite(value: CFrame): boolean
+    for _, component in {value:GetComponents()} do
+        if component ~= component or math.abs(component) == math.huge then return false end
+    end
+    return true
+end
 local function samplers(): {[Instance]: boolean}
     local result = {}
     for _, child in workspace:GetChildren() do
@@ -43,7 +49,8 @@ function Tests.run()
         end
     end
     local shoulder = joints.RightShoulder
-    assert(shoulder and joints.LeftHip and joints.RightHip, "Native test requires an actual R15 rig")
+    local visualRoot = joints.Root or joints.RootJoint
+    assert(shoulder and joints.LeftHip and joints.RightHip and visualRoot, "Native test requires an actual R15 rig")
     local sourceArchivable, sourceAnchored = character.Archivable, root.Anchored
     local sourceTracks: {[string]: boolean} = {}
     local trackEvent = sourceAnimator.AnimationPlayed:Connect(function(track)
@@ -56,9 +63,12 @@ function Tests.run()
     local capturing: RBXScriptConnection? = nil
     local function unchangedImmediately(action: () -> ())
         local rootBefore, jointBefore = root.CFrame, {}
+        local velocityBefore, angularBefore = root.AssemblyLinearVelocity, root.AssemblyAngularVelocity
         for _, joint in joints do jointBefore[joint] = joint.Transform end
         action()
         assert(root.CFrame == rootBefore, "Sampler wrote the authoritative character root")
+        assert(root.AssemblyLinearVelocity == velocityBefore and root.AssemblyAngularVelocity == angularBefore,
+            "Sampler reset physical root velocity")
         for joint, value in jointBefore do assert(joint.Transform == value, "Sampler wrote a live character joint") end
     end
     local ok, problem = xpcall(function()
@@ -110,17 +120,44 @@ function Tests.run()
                 return value
             end
             assert(angle(seek(0)) < 0.01, "Native neutral sample is not neutral")
+            local initialSupport = active.support(visualRoot)
+            assert(initialSupport and initialSupport.Position.Magnitude < 0.01 and angle(initialSupport) < 0.00001,
+                "Visual support did not begin neutral")
             local windup = seek(spec.windup)
+            local support = active.support(visualRoot)
+            assert(support and finite(support) and angle(support) < 0.00001, "Visual support is absent or rotates the rig root")
+            local supportPosition = support.Position
+            assert(math.abs(supportPosition.X) <= 0.15001 and math.abs(supportPosition.Z) <= 0.15001
+                and supportPosition.Y >= -0.50001 and supportPosition.Y <= 0.10001, "Visual root support escaped its translation limits")
+            if spec.name == "WarriorStrike" then assert(supportPosition.Y < -0.1, "Authored warrior crouch lost visual pelvis support") end
             local contact = seek(spec.contact)
             assert(math.max(angle(windup), angle(contact)) > math.rad(15), "Native clip produced no meaningful arm movement")
             assert(angle(windup:ToObjectSpace(contact)) > math.rad(5), "Paused native track ignored seek across contact")
             local held = seek(spec.contact)
             assert(angle(held:ToObjectSpace(contact)) < 0.01, "Paused native clip continued advancing")
             assert(angle(seek(0)) < 0.01, "Backward seek failed to return to neutral")
-            for _, name in {"LeftHip", "RightHip", "LeftKnee", "RightKnee", "LeftAnkle", "RightAnkle", "Root", "RootJoint"} do
+            assert((active.support(visualRoot) :: CFrame).Position.Magnitude < 0.01, "Backward seek retained visual support")
+            for _, name in {"LeftHip", "RightHip", "LeftKnee", "RightKnee", "LeftAnkle", "RightAnkle"} do
                 local joint = joints[name]
-                if joint then assert(active.sample(joint) == nil, "Sampler exposed root or leg motion: " .. name) end
+                assert(joint, "R15 support joint missing: " .. name)
+                local value = active.sample(joint)
+                assert(value and finite(value) and angle(value) < 0.01, "Native leg did not return to neutral: " .. name)
             end
+            seek(spec.windup)
+            for _, name in {"LeftHip", "RightHip", "LeftKnee", "RightKnee", "LeftAnkle", "RightAnkle"} do
+                local joint = joints[name]
+                local value = active.sample(joint)
+                assert(value and finite(value), "Native lower-body sample absent or nonfinite: " .. name)
+            end
+            for _, name in {"Root", "RootJoint"} do
+                local joint = joints[name]
+                if joint then assert(active.sample(joint) == nil, "Sampler exposed physical root motion: " .. name) end
+            end
+            assert(active.support(shoulder) == nil and active.support(joints.LeftHip) == nil, "Support port exposed non-root joints")
+            seek(10) -- The sampler clamps to the native clip's final evaluated frame.
+            local finalSupport = active.support(visualRoot)
+            assert(finalSupport and finalSupport.Position.Magnitude < 0.01 and angle(finalSupport) < 0.00001,
+                "Native recovery retained visual root support")
             local tracks = samplerAnimator:GetPlayingAnimationTracks()
             assert(#tracks == 1, "Sampler did not use exactly one native track")
             local animation = tracks[1].Animation
@@ -131,10 +168,11 @@ function Tests.run()
             if preparing then preparing:Disconnect(); preparing = nil end
             if capturing then capturing:Disconnect(); capturing = nil end
             unchangedImmediately(active.destroy)
-            assert(clone.Parent == nil and active.sample(shoulder) == nil, "Destroyed sampler retained resources or samples")
+            assert(clone.Parent == nil and active.sample(shoulder) == nil and active.support(visualRoot) == nil, "Destroyed sampler retained resources or samples")
             active.destroy(); active = nil
             for rig in samplers() do assert(baseline[rig], "Native sampler leaked after cleanup") end
-            print("LIVING_NATIVE_CLIP_PASS", player.UserId, spec.name, "arm windup/contact radians", angle(windup), angle(contact))
+            print("LIVING_NATIVE_CLIP_PASS", player.UserId, spec.name, "arm windup/contact radians", angle(windup), angle(contact),
+                "six finite lower joints; bounded visual support", supportPosition, "physical root excluded; live source joints unchanged by every sampler call")
         end
         assert(character.Archivable == sourceArchivable and root.Anchored == sourceAnchored, "Sampler changed live rig properties")
         for joint, value in rest do

@@ -4,7 +4,8 @@ local Vector3, CFrame = rb.Vector3, rb.CFrame
 local function module(name, environment) return luau.load(fs.readFile("src/client/presentation/" .. name .. ".luau"), { environment = environment })() end
 local Timeline = module("PreparationTimeline", {})
 local motions = { MeleeMotion = module("MeleeMotion", { Vector3 = Vector3 }), HeavyMotion = module("HeavyMotion", { Vector3 = Vector3 }),
-	DashPoseMotion = module("DashPoseMotion", { Vector3 = Vector3 }), PreparationTimeline = Timeline }
+	DashPoseMotion = module("DashPoseMotion", { Vector3 = Vector3 }), PreparationTimeline = Timeline,
+    NativePoseLocomotion = module("NativePoseLocomotion", {Vector3 = Vector3, Enum = rb.Enum}) }
 local total = 0
 local function test(name, run) run(); total += 1; print("PASS", name) end
 local function near(a, b) assert(math.abs(a - b) < 0.00001, tostring(a) .. " ~= " .. tostring(b)) end
@@ -18,18 +19,22 @@ local function signal()
 	function event.fire(...) for _, value in list do if value[1].Connected then value[2](...) end end end
 	return event
 end
-local function fixture(nativeMode)
+local function fixture(nativeMode, actualFacing)
 	local f = { time = 100, life = 7, classId = "warrior", motors = {}, base = {}, faces = {}, objects = {} }
 	local character = { Parent = true }; f.character = character
 	function character:GetAttribute(name) return if name == "CombatLife" then f.life else f.classId end
-	f.human = { Parent = character, Health = 100, MoveDirection = Vector3.zero, AutoRotate = true }
+	f.human = { Parent = character, Health = 100, MoveDirection = Vector3.zero, AutoRotate = true, FloorMaterial = rb.Enum.Material.Grass }
 	f.rootData = { Parent = character, Anchored = false, Position = Vector3.new(10, 3, 0), CFrame = CFrame.new(10, 3, 0), AssemblyLinearVelocity = Vector3.new(0, 4, -16) }
 	f.root = setmetatable({}, { __index = function(_, key) return if key == "IsA" then function(_, name) return name == "BasePart" end else f.rootData[key] end,
-		__newindex = function(_, key) error("Preparation feedback wrote physical root: " .. key) end })
+        __newindex = function(_, key, value)
+            assert(actualFacing and key == "CFrame", "Preparation feedback wrote physical root: " .. key)
+            assert((value.Position - f.rootData.Position).Magnitude < 0.00001, "Facing replayed another physical position")
+            f.rootData.CFrame = value
+        end })
 	function character:FindFirstChildOfClass() return f.human end
 	function character:FindFirstChild(name) return if name == "HumanoidRootPart" then f.root else if name == "UpperTorso" then {} else nil end
 	local descendants = {}
-	for _, name in { "Waist", "Neck", "RightShoulder", "LeftShoulder", "RightElbow", "LeftElbow", "RightWrist", "LeftWrist", "RightHip", "LeftHip" } do
+	for _, name in { "Waist", "Neck", "RightShoulder", "LeftShoulder", "RightElbow", "LeftElbow", "RightWrist", "LeftWrist", "RightHip", "LeftHip", "RightKnee", "LeftKnee", "RightAnkle", "LeftAnkle", "RootJoint" } do
 		local motor = { Parent = character, Name = name, Transform = CFrame.Angles(0.03, 0.05, 0.02), C0 = CFrame.identity }
 		function motor:IsA(kind) return kind == "Motor6D" end
 		f.motors[name], f.base[name] = motor, motor.Transform; table.insert(descendants, motor)
@@ -38,7 +43,12 @@ local function fixture(nativeMode)
 	f.player = { UserId = 10, Character = character }
 	local players = { LocalPlayer = f.player }; function players:GetPlayerByUserId(owner) return if owner == 10 then f.player else nil end
 	local facing = {}
+	local realFacing = if actualFacing then module("MeleeFacing", {Vector3 = Vector3, CFrame = CFrame}) else nil
 	function facing.new()
+        if realFacing then
+            local value = realFacing.new(character, f.facingDirection or Vector3.new(1, 0, 0))
+            table.insert(f.faces, value); return value
+        end
 		f.human.AutoRotate = false; local value = { destroyed = false, step = function() end }
 		function value.destroy() value.destroyed = true; f.human.AutoRotate = true end
 		table.insert(f.faces, value); return value
@@ -58,9 +68,13 @@ local function fixture(nativeMode)
 		end
 		function handle.capture() assert(not handle.destroyed and handle.prepared); handle.prepared = false end
 		function handle.sample(joint)
-			assert(not handle.destroyed and joint.Name ~= "RightHip" and joint.Name ~= "LeftHip", "Native pose touched running legs")
+			assert(not handle.destroyed and joint.Name ~= "RootJoint" and joint.Name ~= "Root", "Native pose touched physical root")
 			return CFrame.Angles(handle.time, 0, 0)
 		end
+        function handle.support(joint)
+            assert(not handle.destroyed and joint.Name == "RootJoint", "Visual support escaped the rig root joint")
+            return CFrame.new(0, -math.min(0.35, handle.time), 0)
+        end
 		function handle.destroy()
 			assert(not handle.destroyed, "Native pose released its sampler twice")
 			handle.destroyed = true; f.native.destroyed += 1
@@ -79,7 +93,7 @@ local function fixture(nativeMode)
 	function f.tick(at, effects)
 		f.time = at; f.pose.beforePose(); f.cast.beforePose()
 		f.pose.preparePose(f.time); f.cast.preparePose(f.time)
-		f.pose.afterPose(f.time, 1 / 60); f.cast.afterPose(f.time)
+		f.pose.afterPose(f.time, 1 / 60); f.cast.afterPose(f.time, 1 / 60)
 		if effects then effects.step(f.time) end
 	end
 	function f.restored() for name, motor in f.motors do assert(angle(motor.Transform, f.base[name]) < 0.00001, "Not restored: " .. name) end end
@@ -298,5 +312,76 @@ test("native cast preserves directional head focus and release-hand aim without 
 		assert(f.motors.LeftHip.Transform == f.base.LeftHip and f.motors.RightHip.Transform == f.base.RightHip)
 		f.tick(101.16); f.restored(); f.cast.destroy(); f.pose.destroy()
 	end
+end)
+
+test("native stationary feet blend into authored support and yield smoothly to running and jumping", function()
+    for _, which in {"melee", "arrow"} do
+        local f, action, preview = nativeAction(which)
+        f.human.MoveDirection = Vector3.zero; f.rootData.AssemblyLinearVelocity = Vector3.zero
+        assert(preview(51))
+        for index = 1, 12 do f.tick(100 + index / 60) end
+        local held = angle(f.motors.RightHip.Transform, f.base.RightHip)
+        assert(held > 0.02 and angle(f.motors.LeftKnee.Transform, f.base.LeftKnee) > 0.02,
+            "Stationary native clip never reached lower joints")
+        f.human.MoveDirection = forward; f.rootData.AssemblyLinearVelocity = forward * 16
+        f.tick(100.22)
+        local fading = angle(f.motors.RightHip.Transform, f.base.RightHip)
+        assert(fading > 0 and fading < held, "Running switched the lower pose abruptly")
+        for index = 1, 30 do f.tick(100.22 + index / 60) end
+        assert(f.motors.RightHip.Transform == f.base.RightHip and f.motors.LeftKnee.Transform == f.base.LeftKnee,
+            "Native feet retained the running joints")
+        f.human.MoveDirection = Vector3.zero; f.rootData.AssemblyLinearVelocity = Vector3.zero
+        for index = 1, 12 do f.tick(100.72 + index / 60) end
+        assert(angle(f.motors.LeftAnkle.Transform, f.base.LeftAnkle) > 0.02)
+        f.human.FloorMaterial = rb.Enum.Material.Air; f.rootData.AssemblyLinearVelocity = Vector3.new(0, 12, 0)
+        for index = 1, 30 do f.tick(100.92 + index / 60) end
+        assert(f.motors.LeftAnkle.Transform == f.base.LeftAnkle and f.motors.RightHip.Transform == f.base.RightHip,
+            "Native foot support survived leaving the ground")
+        action.destroy(); f.pose.destroy(); f.cast.destroy(); f.restored()
+    end
+end)
+
+test("native cast adopts one facing owner and restores AutoRotate on denial death pause and completion", function()
+    for _, reason in {"denial", "death", "pause", "completion"} do
+        local f = fixture(true, true); f.classId = "warlock"
+        local originalFrame = f.root.CFrame
+        assert(f.cast.preview(10, 51, 7, Vector3.xAxis)); f.tick(100.1)
+        assert(#f.faces == 1 and not f.human.AutoRotate and angle(originalFrame, f.root.CFrame) > 0.1)
+        local face = f.faces[1]
+        f.cast.begin(10, 100.7, Vector3.xAxis, 100, 51)
+        assert(#f.faces == 1 and f.faces[1] == face, "Acceptance replaced native facing")
+        -- The orientation write must read the latest simulated position.
+        f.rootData.Position = Vector3.new(17, 3, -5)
+        f.rootData.CFrame = CFrame.new(f.rootData.Position) * f.rootData.CFrame.Rotation
+        f.tick(100.2)
+        if reason == "denial" then
+            f.cast.stop(10)
+            assert(f.cast.preview(10, 52, 7, Vector3.xAxis)); f.cast.cancelPreview(10, 52)
+        elseif reason == "death" then f.human.Health = 0; f.tick(100.3)
+        elseif reason == "pause" then f.rootData.Anchored = true; f.tick(100.3)
+        else f.tick(101.151) end
+        assert(not f.cast.active(10) and f.human.AutoRotate, "Native facing leaked AutoRotate ownership")
+        assert(f.root.Position == Vector3.new(17, 3, -5) and f.root.AssemblyLinearVelocity == Vector3.new(0, 4, -16))
+        f.cast.destroy(); f.pose.destroy(); f.restored()
+    end
+end)
+
+test("native grounded support moves only the visual root joint and restores it on running and cleanup", function()
+    for _, which in {"melee", "arrow"} do
+        local f, action, preview = nativeAction(which)
+        f.human.MoveDirection = Vector3.zero; f.rootData.AssemblyLinearVelocity = Vector3.zero
+        local position, physicalFrame = f.root.Position, f.root.CFrame
+        assert(preview(61))
+        for index = 1, 12 do f.tick(100 + index / 60) end
+        local visual = f.motors.RootJoint.Transform
+        assert(visual.Position.Y < -0.01 and visual.Position.Y >= -0.5, "Authored support did not lower the visual torso")
+        assert(angle(visual, f.base.RootJoint) < 0.00001, "Visual support introduced root rotation")
+        assert(f.root.Position == position and f.root.CFrame == physicalFrame and f.root.AssemblyLinearVelocity == Vector3.zero)
+        f.human.MoveDirection = forward; f.rootData.AssemblyLinearVelocity = forward * 16
+        for index = 1, 30 do f.tick(100.2 + index / 60) end
+        assert(f.motors.RootJoint.Transform == f.base.RootJoint, "Support translation retained the running root joint")
+        action.destroy(); f.pose.destroy(); f.cast.destroy(); f.restored()
+        assert(f.root.Position == position and f.root.CFrame == physicalFrame and f.root.AssemblyLinearVelocity == forward * 16)
+    end
 end)
 print(string.format("%d preparation feedback boundary tests passed", total))
