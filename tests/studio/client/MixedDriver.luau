@@ -238,7 +238,7 @@ function Driver.new(player: Player)
 			local before, began, start = corrections(), os.clock(), body.Position
 			local previous, previousAt, speed, stableSince, lastDash = start, began, humanoid.WalkSpeed, began, began
 			local previousVelocity, previousCorrections = body.AssemblyLinearVelocity, before
-			local metrics: any = { start = start, samples = 0, rewinds = 0, backward = 0, maxStep = 0, stableSpeedSegments = {},
+			local metrics: any = { start = start, samples = 0, rewinds = 0, backward = 0, maxStep = 0, maxExcessStep = 0, stableSpeedSegments = {},
 				rewindTrace = {}, correctionsBefore = before }
 			for _, value in { "10.4", "9.6", "16" } do metrics.stableSpeedSegments[value] = { distance = 0, time = 0, samples = 0, speed = 0 } end
 			local sample = RunService.Heartbeat:Connect(function()
@@ -259,6 +259,7 @@ function Driver.new(player: Player)
 				end
 				if nearest then metrics.minOtherRootGap = math.min(metrics.minOtherRootGap or math.huge, nearest.gap) end
 				metrics.samples += 1; metrics.maxStep = math.max(metrics.maxStep, progress)
+				metrics.maxExcessStep = math.max(metrics.maxExcessStep, progress - speed * dt)
 				if progress < -0.1 then
 					metrics.rewinds += 1
 					if #metrics.rewindTrace < 4 then
@@ -285,7 +286,7 @@ function Driver.new(player: Player)
 			end)
 			local ok, problem = xpcall(function()
 				input:SendKey(true, Enum.KeyCode.W, false)
-				local dashed = false
+				local dashed, attacked = false, false
 				while os.clock() - began < data.duration do
 					assert(not stopped and life() == token, "Movement life changed during the probe")
 					if data.dashAt and not dashed and os.clock() - began >= data.dashAt then
@@ -293,6 +294,15 @@ function Driver.new(player: Player)
 						tap(input, "dash", camera.ViewportSize / 2); metrics.dashReply = waitReply("dash", prior, token).event
 						assert(metrics.dashReply.ok, "Moving E rejected: " .. tostring(metrics.dashReply.reason))
 					end
+                    if data.attackAt and not attacked and os.clock() - began >= data.attackAt then
+                        attacked = true
+                        local ability = data.ability
+                        assert(ability == "melee" or ability == "arrow", "Moving attack must use LMB")
+                        local prior = latest[ability]
+                        tap(input, ability, camera.ViewportSize / 2)
+                        metrics.attackReply = waitReply(ability, prior, token).event
+                        assert(metrics.attackReply.ok, "Moving LMB rejected: " .. tostring(metrics.attackReply.reason))
+                    end
 					task.wait(0.01)
 				end
 			end, debug.traceback)

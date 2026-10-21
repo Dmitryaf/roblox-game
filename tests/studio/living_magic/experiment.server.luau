@@ -92,6 +92,12 @@ local ok, problem = xpcall(function()
         assert(redirected.owner == caster.UserId and redirected.damageOwner == warrior.UserId)
         assert(redirected.expiresAt == shot.expiresAt and redirected.speed == 58, "Redirect renewed or accelerated arrow")
         if teleport then
+            -- A late intercept can occur beside the warrior; wait for an empty landing
+            -- envelope instead of asking the production teleport to overlap the opponent.
+            waitFor(function()
+                local arrow = own(combat(caster).arrow, caster)
+                return arrow ~= nil and arrow.position.Z >= 12
+            end, 0.4, "Returned arrow did not clear the warrior for teleport")
             local moved = cast(caster, "teleport", nil)
             assert(moved.reply.ok and own(moved.state, caster) == nil)
             task.wait(0.7)
@@ -110,6 +116,18 @@ local ok, problem = xpcall(function()
         print("LIVING_REDIRECT_PASS", if teleport then "creator teleport without damage" else "warrior damage ownership")
     end
     duel(false); duel(true)
+    for _, p in {warrior, caster} do
+        local ability = if p == warrior then "melee" else "arrow"
+        waitFor(function() return now() > combat(p)[ability].readyAt end, 5, "Moving attack cooldown")
+        place(p, Vector3.new(-48, 3, 35))
+        place(if p == warrior then caster else warrior, Vector3.new(40, 3, -30))
+        local movement = command(p, "move", {direction = Vector3.new(0, 0, -1), duration = 2.1, attackAt = 0.5, ability = ability})
+        local speed = movement.stableSpeedSegments["16"]
+        assert(movement.attackReply.ok and speed.samples >= 20 and speed.speed >= 14, "Native attack suppressed running speed")
+        assert(movement.rewinds == 0 and movement.backward < 0.25 and movement.maxExcessStep < 0.75 and movement.corrections == 0,
+            "Native attack introduced a movement correction")
+        print("LIVING_NATIVE_RUNNING_PASS", ability, "speed", speed.speed, "distance", movement.distance, "excess", movement.maxExcessStep)
+    end
     local slot = Vector3.new(22, 0, 28)
     local function raise()
         waitFor(function() return now() > combat(caster).hands.readyAt and now() > combat(caster).arrow.readyAt end, 10, "Cover cooldown")
@@ -138,7 +156,20 @@ local ok, problem = xpcall(function()
     command(warrior, "exit")
     waitFor(function() return context(caster).frozen end, 2, "Exit did not pause duel")
     assert(own(combat(caster).hands, caster) == nil and own(combat(caster).arrow, caster) == nil)
-    for _, p in players do assert(command(p, "inspect").physicsViolations == 0) end
+    for _, p in players do
+        assert(command(p, "inspect").physicsViolations == 0)
+        local native = command(p, "nativeInspect")
+        assert(not native.failure, native.failure)
+        assert(native.nativeFrames > 20 and native.live == 0, "Production native clips absent or leaked")
+        assert(native.geometryViolations == 0 and native.replicationViolations == 0 and native.actorMatchFailures == 0,
+            "Native sampler escaped local presentation")
+        for _, actor in players do
+            local observed = native.actors[tostring(actor.UserId)]
+            assert(observed and observed.frames > 10 and observed.maxHandDisplacement > 0.5,
+                "Native attack did not move an actor's actual hand on both clients")
+        end
+        print("LIVING_NATIVE_PRODUCTION_PASS", p.UserId, game:GetService("HttpService"):JSONEncode(native))
+    end
     print("LIVING_MAGIC_PASS: real two-client class/R/LMB/Q/E; redirect damage/teleport; cover sword/heavy/arrow; no DoT/slow; pause cleanup")
 end, debug.traceback)
 connection:Disconnect(); requests:Disconnect()

@@ -7,6 +7,7 @@ local player = Players.LocalPlayer
 local control = ReplicatedStorage:WaitForChild("LivingReviewControl") :: RemoteEvent
 local loadModule = require :: any
 local driver = loadModule(ReplicatedStorage:WaitForChild("MixedTestDriver") :: ModuleScript).new(player)
+local reviewLabel = if ReplicatedStorage:GetAttribute("LivingMagicExperiment") == true then "NATIVE DRAFT" else "BASELINE"
 local gui = Instance.new("ScreenGui")
 gui.Name, gui.ResetOnSpawn, gui.DisplayOrder = "LivingBaseline", false, 110
 local title = Instance.new("TextButton")
@@ -76,7 +77,7 @@ table.insert(connections, Input.InputBegan:Connect(function(input, processed)
 end))
 table.insert(connections, control.OnClientEvent:Connect(function(id, action, data)
     if action == "failure" then
-        title.Text = "BASELINE STOPPED · " .. data.label .. " · details in Studio Output"
+        title.Text = reviewLabel .. " STOPPED · " .. data.label .. " · details in Studio Output"
         title.Active = false
         return
     end
@@ -87,7 +88,7 @@ table.insert(connections, control.OnClientEvent:Connect(function(id, action, dat
             if effects then for item, old in hidden do if item.Parent then (item :: any)[old.property] = old.value end end; table.clear(hidden) end
         end
         camera()
-        title.Text = string.format("BASELINE · %s · %s · observer %s · N/клик: пуск · F4: ракурс · F6: VFX", data.label, if effects then "VFX ON" else "VFX OFF", player.Name)
+        title.Text = string.format("%s · %s · %s · observer %s · N/клик: пуск · F4: ракурс · F6: VFX", reviewLabel, data.label, if effects then "VFX ON" else "VFX OFF", player.Name)
         return
     end
     local ok, result = xpcall(function() return driver.run(action, data) end, debug.traceback)

@@ -6,6 +6,7 @@ local Driver = loadModule(RS:WaitForChild("MixedTestDriver", 20))
 local driver = Driver.new(game:GetService("Players").LocalPlayer)
 local redirect: any = nil
 local redirectCount, goldFrames = 0, 0
+local nativeObserver: any = nil
 local events = (RS:WaitForChild("ArrowRemote", 20) :: RemoteEvent).OnClientEvent:Connect(function(event: any)
     if event.kind == "redirected" then redirect, redirectCount = event, redirectCount + 1 end
 end)
@@ -18,10 +19,18 @@ end)
 local connection = control.OnClientEvent:Connect(function(id, action, data)
     local ok, result = xpcall(function()
         if action == "livingInspect" then return {redirect = redirect, count = redirectCount, goldFrames = goldFrames} end
+        if action == "nativeInspect" then assert(nativeObserver); return nativeObserver.inspect() end
         return driver.run(action, data)
     end, debug.traceback)
     control:FireServer("report", id, {ok = ok, data = if ok then result else nil, error = if ok then nil else tostring(result)})
 end)
-local ok, problem = xpcall(driver.ready, debug.traceback)
+local ok, problem = xpcall(function()
+    driver.ready()
+    loadModule(RS:WaitForChild("LivingNativePoseTests", 10)).run()
+    nativeObserver = loadModule(RS:WaitForChild("LivingNativeObserver", 10)).new()
+end, debug.traceback)
 if ok then control:FireServer("ready") else control:FireServer("failure", tostring(problem)) end
-script.Destroying:Connect(function() connection:Disconnect(); render:Disconnect(); events:Disconnect(); driver.destroy() end)
+script.Destroying:Connect(function()
+    connection:Disconnect(); render:Disconnect(); events:Disconnect(); driver.destroy()
+    if nativeObserver then nativeObserver.destroy() end
+end)
