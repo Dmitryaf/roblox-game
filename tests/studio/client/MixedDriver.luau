@@ -31,6 +31,11 @@ function Driver.new(player: Player)
 	local badParts: { [Instance]: boolean } = {}
 	local firstPhysics, failure: string? = nil, nil
 	local lastScan, busy, stopped = 0, false, false
+	local interactions: any = { live = 0, parts = 0, peak = 0, peakParts = 0, total = 0, visibleFrames = 0,
+        physicsViolations = 0, attributeViolations = 0, byKind = {}, soundsLoaded = {}, observedBursts = {} }
+    local seenBursts: {[Instance]: boolean} = setmetatable({}, {__mode = "k"}) :: any
+    local loadedSoundSources: {[Instance]: boolean} = setmetatable({}, {__mode = "k"}) :: any
+    local badInteractionParts: {[Instance]: boolean} = setmetatable({}, {__mode = "k"}) :: any
 	local cleanupInput: (() -> ())? = nil
 	local function waitFor(predicate: () -> boolean, seconds: number, message: string)
 		local deadline = os.clock() + seconds
@@ -104,9 +109,54 @@ function Driver.new(player: Player)
 		if badParts[part] then return end
 		badParts[part] = true; physicsViolations += 1; firstPhysics = firstPhysics or message
 	end
+    local function interactionViolation(part: Instance, message: string)
+        if not badInteractionParts[part] then
+            badInteractionParts[part] = true; interactions.physicsViolations += 1
+        end
+        violation(part, message)
+    end
+    local function scanInteractions(renderFrame: boolean?)
+        local folder = workspace:FindFirstChild("LocalLivingInteractions")
+        local live, parts, visible = 0, 0, false
+        if folder then
+            for _, burst in folder:GetChildren() do
+                live += 1
+                if not seenBursts[burst] then
+                    seenBursts[burst] = true; interactions.total += 1
+                    local kind, actionId = burst:GetAttribute("InteractionKind"), burst:GetAttribute("ActionId")
+                    if type(kind) == "string" and type(actionId) == "number" then
+                        interactions.byKind[kind] = (interactions.byKind[kind] or 0) + 1
+                        if #interactions.observedBursts < 32 then table.insert(interactions.observedBursts, {kind = kind, actionId = actionId}) end
+                    else interactions.attributeViolations += 1 end
+                end
+            end
+            for _, object in folder:GetDescendants() do
+                if object:IsA("Sound") and object.IsLoaded and not loadedSoundSources[object] then
+                    local burst = object.Parent and object.Parent.Parent
+                    local kind = burst and burst:GetAttribute("InteractionKind")
+                    if type(kind) == "string" then
+                        loadedSoundSources[object] = true
+                        interactions.soundsLoaded[kind] = (interactions.soundsLoaded[kind] or 0) + 1
+                    end
+                end
+                if object:IsA("BasePart") then
+                    parts += 1; visible = visible or object.Transparency < 1
+                    if not object.Anchored or object.CanCollide or object.CanQuery or object.CanTouch then
+                        interactionViolation(object, "Living interaction VFX entered physics: " .. object:GetFullName())
+                    end
+                end
+            end
+        end
+        interactions.live, interactions.parts = live, parts
+        interactions.peak, interactions.peakParts = math.max(interactions.peak, live), math.max(interactions.peakParts, parts)
+        if visible and renderFrame then interactions.visibleFrames += 1 end
+    end
 	local function scan()
 		local counts: { [string]: number } = {}
 		local include: { Instance } = {}
+        scanInteractions()
+        local interactionFolder = workspace:FindFirstChild("LocalLivingInteractions")
+        if interactionFolder then table.insert(include, interactionFolder) end
 		for key, name in folders do
 			counts[key] = 0
 			local folder = workspace:FindFirstChild(name)
@@ -137,14 +187,21 @@ function Driver.new(player: Player)
 		end
 		if #include > 0 then
 			local query = OverlapParams.new(); query.FilterType, query.FilterDescendantsInstances, query.RespectCanCollide = Enum.RaycastFilterType.Include, include, false
-			for _, part in workspace:GetPartBoundsInBox(CFrame.new(0, 10, 0), Vector3.new(450, 100, 450), query) do violation(part, "Ability VFX entered combat overlap") end
+			for _, part in workspace:GetPartBoundsInBox(CFrame.new(0, 10, 0), Vector3.new(450, 100, 450), query) do
+                if interactionFolder and part:IsDescendantOf(interactionFolder) then
+                    interactionViolation(part, "Living interaction VFX entered combat overlap")
+                else violation(part, "Ability VFX entered combat overlap") end
+            end
 		end
 		for key, count in counts do
 			visuals[key].live, visuals[key].peak = count, math.max(visuals[key].peak, count)
 			if count > 0 then visuals[key].seen += 1 end
 		end
 	end
-	table.insert(connections, RunService.RenderStepped:Connect(function() renderFrames += 1 end))
+	table.insert(connections, RunService.RenderStepped:Connect(function()
+        renderFrames += 1
+        local ok, problem = pcall(function() scanInteractions(true); return true end); if not ok then failure = tostring(problem) end
+    end))
 	table.insert(connections, RunService.Heartbeat:Connect(function()
 		heartbeatFrames += 1
 		if os.clock() - lastScan < 0.08 then return end
@@ -156,7 +213,7 @@ function Driver.new(player: Player)
 		local damage = damageByLife[life()] or { damage = 0, events = 0 }
 		return { sampledAt = workspace:GetServerTimeNow(), position = root().Position, health = human().Health, speed = human().WalkSpeed, life = life(), classId = (player.Character :: Model):GetAttribute("CombatClass"),
 			team = (player.Character :: Model):GetAttribute("MatchTeam"), corrections = corrections(), states = states, matchState = matchState,
-			visuals = visuals, events = events, contacts = contacts, ownContacts = ownContacts, physicsViolations = physicsViolations, firstPhysicsViolation = firstPhysics,
+			visuals = visuals, interactions = interactions, events = events, contacts = contacts, ownContacts = ownContacts, physicsViolations = physicsViolations, firstPhysicsViolation = firstPhysics,
 			cumulativeDamage = cumulativeDamage, cumulativeDamageLife = damage.damage, damageEvents = damageEvents, lifeDamageEvents = damage.events,
 			renderFrames = renderFrames, heartbeatFrames = heartbeatFrames }
 	end
@@ -223,7 +280,7 @@ function Driver.new(player: Player)
 		end
 		if ability == "teleport" or ability == "transfer" then return perform(virtual(), UserInputService:GetMouseLocation()) end
 		local point: Vector3 = data.point or root().Position + root().CFrame.LookVector * 10
-		return withView(CFrame.lookAt(point + Vector3.new(14, 16, 18), point), function(input, camera)
+		return withView(data.viewFrame or CFrame.lookAt(point + Vector3.new(14, 16, 18), point), function(input, camera)
 			local projected, visible = camera:WorldToViewportPoint(point); assert(visible, "Mixed aim target outside viewport")
 			local mouse = Vector2.new(projected.X, projected.Y); input:SendMousePosition(mouse)
 			return perform(input, mouse)

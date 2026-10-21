@@ -70,11 +70,21 @@ local ok, problem = xpcall(function()
     end
     local function duel(teleport: boolean)
         waitFor(function() return now() > combat(caster).arrow.readyAt and now() > combat(warrior).melee.readyAt end, 5, "Arrow cooldown")
-        place(caster, Vector3.new(-40, 3, 30)); place(warrior, Vector3.new(-40, 3, 0))
+        -- The teleport case needs enough return-flight time for a genuine E to
+        -- cross the simulated network after the confirmed redirect. The damage
+        -- case keeps the original shorter lane and all damage expectations.
+        local casterZ = if teleport then 45 else 30
+        place(caster, Vector3.new(-40, 3, casterZ)); place(warrior, Vector3.new(-40, 3, 0))
         local before, enemyBefore = loss[caster], loss[warrior]
-        local shot = own(cast(caster, "arrow", Vector3.new(-40, 4, 0)).state, caster)
+        -- Deliver both real-input commands before their shared schedule. Waiting for
+        -- the arrow's round trip before telling the warrior to swing makes a lag
+        -- fixture miss its own interception window rather than test the mechanic.
+        local startAt = now() + 1
+        local shotCommand = begin(caster, "cast", {ability = "arrow", point = Vector3.new(-40, 4, 0), at = startAt, ok = true})
+        local swing = begin(warrior, "cast", {ability = "melee", point = Vector3.new(-40, 4, casterZ),
+            at = startAt + 0.78 + (casterZ - 30) / 58, ok = true})
+        local shot = own(finish(caster, shotCommand).state, caster)
         assert(shot, "LMB did not prepare an arrow")
-        local swing = begin(warrior, "cast", {ability = "melee", point = Vector3.new(-40, 4, 30), at = shot.launchAt + 0.08, ok = true})
         local redirected: any = nil
         local lastTrace = 0
         waitFor(function()
@@ -129,14 +139,29 @@ local ok, problem = xpcall(function()
         print("LIVING_NATIVE_RUNNING_PASS", ability, "speed", speed.speed, "distance", movement.distance, "excess", movement.maxExcessStep)
     end
     local slot = Vector3.new(22, 0, 28)
-    local function raise()
+    local function coverReady()
         waitFor(function() return now() > combat(caster).hands.readyAt and now() > combat(caster).arrow.readyAt end, 10, "Cover cooldown")
         place(caster, slot + Vector3.new(0, 3, 12)); place(warrior, slot + Vector3.new(0, 3, -6))
+    end
+    local function raise()
+        coverReady()
         local area = own(cast(caster, "hands", slot).state, caster)
         assert(area and area.kind == "preparing")
         waitFor(function() local v = own(combat(caster).hands, caster); return v ~= nil and v.kind == "active" end, 2, "Q did not raise cover")
         return area
     end
+    -- A real participant enters an already accepted warning. The slab must never
+    -- appear around the body, and an accepted preparation still spends cooldown.
+    coverReady()
+    local warning = own(cast(caster, "hands", slot).state, caster)
+    assert(warning and warning.kind == "preparing")
+    bridge:Invoke("place", warrior.UserId, slot + Vector3.new(0, 3, 0))
+    waitFor(function() return own(combat(caster).hands, caster) == nil end, 2, "Occupied warning raised a slab around a player")
+    assert(combat(caster).hands.readyAt > now(), "Occupied warning refunded accepted preparation")
+    local liveCover = workspace:FindFirstChild("LivingCovers", true)
+    assert(liveCover and not liveCover:FindFirstChild("RaisedSlab", true), "Occupied warning retained solid cover")
+    assert(human(warrior).Health > 0 and human(warrior).WalkSpeed == 16, "Warning harmed or slowed occupant")
+    print("LIVING_WARNING_OCCUPIED_PASS: real player blocks accepted raise; cooldown retained")
     raise()
     local before, enemyBefore = loss[caster], loss[warrior]
     cast(warrior, "melee", slot + Vector3.yAxis * 4)
@@ -153,11 +178,33 @@ local ok, problem = xpcall(function()
     assert(human(caster).WalkSpeed == 16 and human(warrior).WalkSpeed == 16, "Cover retained old area slow")
     command(caster, "tap", {ability = "transfer"}); task.wait(0.15); assert(transferRequests == 0)
     raise()
-    command(warrior, "exit")
+    -- Pause while one existing cover is active and another action is preparing.
+    -- Observe server acceptance first, without spending the preparation on a
+    -- client report round trip, then make the opponent leave through the real B.
+    local preparing = begin(caster, "cast", {ability = "arrow", point = slot + Vector3.new(0, 4, 40), ok = true})
+    waitFor(function()
+        local arrow = own(combat(caster).arrow, caster)
+        return arrow ~= nil and arrow.kind == "preparing"
+    end, 2, "Arrow did not enter preparation before pause")
+    local exit = begin(warrior, "exit")
+    finish(caster, preparing); finish(warrior, exit)
     waitFor(function() return context(caster).frozen end, 2, "Exit did not pause duel")
     assert(own(combat(caster).hands, caster) == nil and own(combat(caster).arrow, caster) == nil)
+    print("LIVING_PAUSE_PREPARATION_PASS: active cover and preparing arrow cancelled")
+    task.wait(0.8)
     for _, p in players do
-        assert(command(p, "inspect").physicsViolations == 0)
+        local inspection = command(p, "inspect")
+        assert(inspection.physicsViolations == 0)
+        local cues = inspection.interactions
+        assert(cues.total > 0 and cues.visibleFrames > 0, "Confirmed interaction effects never appeared")
+        for _, kind in {"redirect", "gather", "raise", "shatter"} do
+            assert((cues.byKind[kind] or 0) > 0, "Missing confirmed interaction cue: " .. kind)
+            assert((cues.soundsLoaded[kind] or 0) > 0, "Studio did not load local interaction sound: " .. kind)
+        end
+        assert(cues.live == 0 and cues.parts == 0 and cues.physicsViolations == 0 and cues.attributeViolations == 0,
+            "Interaction effects leaked or entered physics")
+        assert(cues.peak <= 12 and cues.peakParts <= 264, "Interaction VFX exceeded presentation budget")
+        print("LIVING_INTERACTION_PRODUCTION_PASS", p.UserId, game:GetService("HttpService"):JSONEncode(cues))
         local native = command(p, "nativeInspect")
         assert(not native.failure, native.failure)
         assert(native.nativeFrames > 20 and native.live == 0, "Production native clips absent or leaked")

@@ -115,4 +115,45 @@ test("reentrant reset at raise and repeated teardown never resurrect cover", fun
     f.service.destroy(); f.service.destroy()
     assert(f.service.snapshot(1).life == 0)
 end)
+
+test("same-time heavy and arrow destroy one slab once in either order", function()
+    for _, heavyFirst in {true, false} do
+        local f = fixture(); assert(f.cast()); f.service.step(Config.windup)
+        local target = f.models[1]
+        if heavyFirst then
+            assert(f.service.strike(2, Vector3.xAxis, 1) == 1)
+            assert(not f.service.hit(target, 1))
+        else
+            assert(f.service.hit(target, 1))
+            assert(f.service.strike(2, Vector3.xAxis, 1) == 0)
+        end
+        local ended = 0
+        for _, event in f.events do if event.kind == "ended" then ended += 1; assert(event.reason == "shattered") end end
+        assert(ended == 1 and f.removed[1] == 1 and f.models[1] == nil)
+    end
+end)
+
+test("pause and incoming arrow cannot end a slab twice", function()
+    for _, pauseFirst in {true, false} do
+        local f = fixture(); assert(f.cast()); f.service.step(Config.windup)
+        local target = f.models[1]
+        if pauseFirst then
+            f.service.pause(1, 1); assert(not f.service.hit(target, 1))
+        else
+            assert(f.service.hit(target, 1)); f.service.pause(1, 1)
+        end
+        f.service.step(10)
+        local ended = 0
+        for _, event in f.events do if event.kind == "ended" then ended += 1 end end
+        assert(ended == 1 and f.removed[1] == 1 and f.models[1] == nil)
+    end
+end)
+
+test("expiry at heavy contact cannot turn a spent slab into another break", function()
+    local f = fixture(); assert(f.cast()); f.service.step(Config.windup)
+    local target, deadline = f.models[1], Config.windup + Config.duration
+    assert(f.service.strike(2, Vector3.xAxis, deadline) == 0)
+    assert(not f.service.hit(target, deadline))
+    assert(f.removed[1] == 1 and f.events[#f.events].reason == "expired")
+end)
 print("Living cover tests:", total)

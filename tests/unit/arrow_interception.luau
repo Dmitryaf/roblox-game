@@ -116,4 +116,39 @@ test("sector rejects height, expired window and out of range", function()
     end
     assert(not Sector.fraction(V.zero, V.xAxis * 20, 2, 3, V.new(10, 0, 0), -V.xAxis, 0.9, 0.18, 7, 100))
 end)
+
+test("same-time redirect and creator teleport resolve once in either call order", function()
+    for _, teleportFirst in {true, false} do
+        local f = fixture()
+        if not teleportFirst then f.service.step(1.05) end
+        assert(f.service.teleport(1, 10, f.id, 1.05))
+        f.service.step(1.05); f.service.step(1.5)
+        assert(not f.service.teleport(1, 10, f.id, 1.05))
+        local ended = 0
+        for _, event in f.events do if event.kind == "ended" then ended += 1; assert(event.reason == "teleported") end end
+        assert(f.redirectCount() == 1 and ended == 1 and #f.moves == 1 and #f.damage == 0)
+    end
+end)
+
+test("same-time returned hit and teleport always resolve hit before movement", function()
+    for _, stepFirst in {true, false} do
+        local f = fixture(); f.target = 0
+        if stepFirst then f.service.step(1.5) end
+        assert(not f.service.teleport(1, 10, f.id, 1.5))
+        f.service.step(1.5); f.service.step(2)
+        local ended = 0
+        for _, event in f.events do if event.kind == "ended" then ended += 1; assert(event.reason == "hit") end end
+        assert(ended == 1 and #f.damage == 1 and #f.moves == 0 and not f.active())
+    end
+end)
+
+test("delayed old-life teleport cannot consume replacement arrow", function()
+    local f = fixture(); f.service.step(1.05)
+    f.service.join(1, 11)
+    assert(f.service.cast(1, 11, V.xAxis, 2))
+    local replacement = f.active()
+    local ok, reason = f.service.teleport(1, 10, f.id, 2.8)
+    assert(not ok and reason == "stale_life")
+    assert(f.active().castId == replacement.castId and f.active().life == 11 and #f.moves == 0)
+end)
 print(total, "interception contracts passed (simulated ports; no Studio physics)")
