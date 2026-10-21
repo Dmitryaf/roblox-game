@@ -7,6 +7,11 @@ ROOT = Path(__file__).resolve().parents[1]
 project = json.loads((ROOT / "default.project.json").read_text(encoding="utf-8"))
 project["name"] = "LivingMagic"
 project["tree"]["ServerStorage"] = {"$className": "ServerStorage", "$attributes": {"LivingMagicExperiment": True}}
+project["tree"]["ReplicatedStorage"]["NativeCombatClips"] = {
+    "$className": "Folder",
+    "WarriorStrike": {"$path": "assets/animations/WarriorStrike_Draft02.rbxmx"},
+    "WarlockCast": {"$path": "assets/animations/WarlockCast_Draft01.rbxmx"},
+}
 
 def absolute_paths(value):
     if isinstance(value, dict):

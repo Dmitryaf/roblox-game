@@ -7,7 +7,11 @@ function Layers.new(layers: { any })
 	local function restore()
 		for index = #layers, 1, -1 do layers[index].beforePose() end
 	end
-	local animation = RunService.PreAnimation:Connect(restore)
+	local animation = RunService.PreAnimation:Connect(function()
+		restore()
+		local now = workspace:GetServerTimeNow()
+		for _, layer in layers do if layer.preparePose then layer.preparePose(now) end end
+	end)
 	local simulation = RunService.PreSimulation:Connect(function(delta: number)
 		if stopped then return end
 		restore()

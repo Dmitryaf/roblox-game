@@ -18,7 +18,7 @@ local function signal()
 	function event.fire(...) for _, value in list do if value[1].Connected then value[2](...) end end end
 	return event
 end
-local function fixture()
+local function fixture(nativeMode)
 	local f = { time = 100, life = 7, classId = "warrior", motors = {}, base = {}, faces = {}, objects = {} }
 	local character = { Parent = true }; f.character = character
 	function character:GetAttribute(name) return if name == "CombatLife" then f.life else f.classId end
@@ -48,13 +48,37 @@ local function fixture()
 	f.game = {}; function f.game:GetService(name) return services[name] end
 	f.world = {}; function f.world:GetServerTimeNow() return f.time end
 	local dependencies = table.clone(motions); dependencies.MeleeFacing = facing
+	f.native = { handles = {}, destroyed = 0 }
+	dependencies.NativePoseTiming = module("NativePoseTiming", {})
+	dependencies.NativePoseSampler = { new = function(source, clip)
+		assert(source == character)
+		local handle = { clip = clip.Name, destroyed = false, time = 0, prepared = false }
+		function handle.prepare(time)
+			assert(not handle.destroyed); handle.time, handle.prepared = time, true
+		end
+		function handle.capture() assert(not handle.destroyed and handle.prepared); handle.prepared = false end
+		function handle.sample(joint)
+			assert(not handle.destroyed and joint.Name ~= "RightHip" and joint.Name ~= "LeftHip", "Native pose touched running legs")
+			return CFrame.Angles(handle.time, 0, 0)
+		end
+		function handle.destroy()
+			assert(not handle.destroyed, "Native pose released its sampler twice")
+			handle.destroyed = true; f.native.destroyed += 1
+		end
+		table.insert(f.native.handles, handle)
+		return handle
+	end }
+	local clips = if nativeMode then { FindFirstChild = function(_, name)
+		return { Name = name, IsA = function(_, kind) return kind == "AnimationClip" end }
+	end } else nil
 	local names = {}; for name in dependencies do names[name] = name end
 	f.pose = module("MeleePose", { game = f.game, workspace = f.world, Vector3 = Vector3, CFrame = CFrame, script = { Parent = names },
-		require = function(name) return assert(dependencies[name]) end }).new(true)
+		require = function(name) return assert(dependencies[name]) end }).new(true, clips)
 	f.cast = module("CastPose", { game = f.game, workspace = f.world, Vector3 = Vector3, CFrame = CFrame,
-		script = { Parent = { PreparationTimeline = "Timeline" } }, require = function(name) assert(name == "Timeline"); return Timeline end }).new(function() return f.time end, true)
+		script = { Parent = names }, require = function(name) return assert(dependencies[name]) end }).new(function() return f.time end, true, clips)
 	function f.tick(at, effects)
 		f.time = at; f.pose.beforePose(); f.cast.beforePose()
+		f.pose.preparePose(f.time); f.cast.preparePose(f.time)
 		f.pose.afterPose(f.time, 1 / 60); f.cast.afterPose(f.time)
 		if effects then effects.step(f.time) end
 	end
@@ -174,5 +198,105 @@ test("arrow preview confirms with the same request without lowering the hands or
 	f.tick(100.849); local gather = f.motors.RightShoulder.Transform
 	f.tick(100.9); assert(angle(gather, f.motors.RightShoulder.Transform) > 0.1)
 	f.pose.destroy(); f.cast.destroy(); f.restored()
+end)
+local function nativeAction(which)
+	local f = fixture(true)
+	f.classId = if which == "arrow" then "warlock" else "warrior"
+	f.human.MoveDirection = forward
+	local action = if which == "arrow" then f.cast else f.pose
+	local function preview(id)
+		return if which == "arrow" then action.preview(10, id, 7, forward) else action.preview(10, "melee", id, 7, forward)
+	end
+	local function confirm(id)
+		if which == "arrow" then action.begin(10, 100.7, forward, 100.1, id)
+		else action.begin(10, 100.7, 100.1, 101.15, forward, 91, id) end
+	end
+	local function cancel(id)
+		if which == "arrow" then action.cancelPreview(10, id) else action.cancelPreview(10, "melee", id) end
+	end
+	return f, action, preview, confirm, cancel
+end
+
+test("native sword and arrow adopt one preview sampler, keep its pose, and reach contact only at the accepted deadline", function()
+	for _, which in { "melee", "arrow" } do
+		local f, action, preview, confirm, cancel = nativeAction(which)
+		assert(preview(41)); f.tick(100.1)
+		assert(#f.native.handles == 1 and f.native.destroyed == 0)
+		local handle = f.native.handles[1]
+		local clipContact = if which == "arrow" then 0.708333313 else 0.458333343
+		local beforeTime, beforePose = handle.time, f.motors.RightShoulder.Transform
+		assert(beforeTime > 0 and beforeTime < clipContact * 0.32 and angle(beforePose, f.base.RightShoulder) > 0.01)
+		confirm(41); f.tick(100.1)
+		assert(#f.native.handles == 1 and f.native.destroyed == 0 and action.active(10))
+		near(handle.time, beforeTime); assert(angle(beforePose, f.motors.RightShoulder.Transform) < 0.00001)
+		cancel(41); assert(action.active(10) and not handle.destroyed, "Late rejection erased an accepted native pose")
+		f.tick(100.699); assert(handle.time < clipContact)
+		f.tick(100.7); near(handle.time, clipContact)
+		assert(f.motors.LeftHip.Transform == f.base.LeftHip and f.motors.RightHip.Transform == f.base.RightHip)
+		assert(f.root.AssemblyLinearVelocity == Vector3.new(0, 4, -16))
+		f.tick(101.151); assert(not action.active(10) and handle.destroyed and f.native.destroyed == 1); f.restored()
+		f.pose.destroy(); f.cast.destroy(); assert(f.native.destroyed == 1)
+	end
+end)
+
+test("native preparation denial is request-scoped and releases its overlay and sampler once", function()
+	for _, which in { "melee", "arrow" } do
+		local f, action, preview, _, cancel = nativeAction(which)
+		assert(preview(41)); f.tick(100.15)
+		cancel(42); assert(action.active(10) and f.native.destroyed == 0)
+		cancel(41); assert(not action.active(10) and f.native.destroyed == 1); f.restored()
+		f.tick(100.9); assert(not action.active(10) and #f.native.handles == 1)
+		f.pose.destroy(); f.cast.destroy(); assert(f.native.destroyed == 1)
+	end
+end)
+
+test("native preview timeout and accepted or pending life death pause destroy paths release all resources", function()
+	for _, which in { "melee", "arrow" } do
+		for _, phase in { "pending", "accepted" } do
+			for _, reason in { "timeout", "life", "death", "pause", "destroy" } do
+				local f, action, preview, confirm = nativeAction(which)
+				assert(preview(41)); if phase == "accepted" then confirm(41) end
+				f.tick(100.15)
+				assert(f.motors.LeftHip.Transform == f.base.LeftHip and f.motors.RightHip.Transform == f.base.RightHip)
+				if reason == "life" then f.life = 8
+				elseif reason == "death" then f.human.Health = 0
+				elseif reason == "pause" then f.rootData.Anchored = true
+				elseif reason == "destroy" then action.destroy() end
+				f.tick(if reason == "timeout" then 103 else 100.2)
+				assert(not action.active(10) and #f.native.handles == 1 and f.native.destroyed == 1,
+					which .. " " .. phase .. " " .. reason .. " retained a native pose")
+				f.restored(); assert(f.root.AssemblyLinearVelocity == Vector3.new(0, 4, -16))
+				f.pose.destroy(); f.cast.destroy(); assert(f.native.destroyed == 1)
+			end
+		end
+	end
+end)
+
+test("native sword Effects deduplicate authoritative events without replacing the adopted sampler", function()
+	local f = fixture(true); local effects = f.effects()
+	assert(effects.preview(41, 7, forward)); f.tick(100.1, effects)
+	local event = { kind = "preparing", owner = 10, life = 7, swingId = 91, requestId = 41,
+		direction = forward, startedAt = 100.1, hitAt = 100.7, expiresAt = 101.15 }
+	effects.event(event); effects.event(table.clone(event)); effects.sync({table.clone(event)})
+	assert(#f.native.handles == 1 and f.native.destroyed == 0)
+	f.tick(100.699, effects); assert(f.count("WarriorSwing") == 0)
+	f.tick(100.701, effects); assert(f.count("WarriorSwing") == 1)
+	effects.destroy(); f.pose.destroy(); f.cast.destroy(); f.restored()
+	assert(f.native.destroyed == 1)
+end)
+test("native cast preserves directional head focus and release-hand aim without rotating the root or legs", function()
+	local straight, aimed = fixture(true), fixture(true)
+	for _, f in {straight, aimed} do f.classId = "warlock" end
+	straight.cast.begin(10, 100.7, forward, 100)
+	aimed.cast.begin(10, 100.7, Vector3.new(0.5, 0.4, -1).Unit, 100)
+	straight.tick(100.64); aimed.tick(100.64)
+	assert(angle(straight.motors.Neck.Transform, aimed.motors.Neck.Transform) > 0.1)
+	assert(angle(straight.motors.RightShoulder.Transform, aimed.motors.RightShoulder.Transform) < 0.00001)
+	straight.tick(100.75); aimed.tick(100.75)
+	assert(angle(straight.motors.RightShoulder.Transform, aimed.motors.RightShoulder.Transform) > 0.1)
+	for _, f in {straight, aimed} do
+		assert(f.motors.LeftHip.Transform == f.base.LeftHip and f.motors.RightHip.Transform == f.base.RightHip)
+		f.tick(101.16); f.restored(); f.cast.destroy(); f.pose.destroy()
+	end
 end)
 print(string.format("%d preparation feedback boundary tests passed", total))

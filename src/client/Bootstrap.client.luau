@@ -32,9 +32,19 @@ local PoseLayers = require(script.Parent.presentation.PoseLayers)
 local ClassLocomotion = require(script.Parent.presentation.ClassLocomotion)
 local HitReaction = require(script.Parent.presentation.HitReaction)
 local player = Players.LocalPlayer
+local remote = ReplicatedStorage:WaitForChild("ArrowRemote", 15)
+assert(remote and remote:IsA("RemoteEvent"), "Combat test server did not start; check Server Output.")
+local experiment = ReplicatedStorage:GetAttribute("LivingMagicExperiment") == true
+local clips = if experiment and RunService:IsStudio() then ReplicatedStorage:WaitForChild("NativeCombatClips", 10) else nil
+if experiment and RunService:IsStudio() then
+    if not clips or not clips:WaitForChild("WarriorStrike", 5) or not clips:WaitForChild("WarlockCast", 5) then
+        warn("Native combat clips missing from this experiment build; using the comparison poses")
+        clips = nil
+    end
+end
 local dashMotion = DashMotion.new(player)
-local warriorPose = WarriorPose.new(true)
-local castPose = CastPose.new(nil, true)
+local warriorPose = WarriorPose.new(true, clips)
+local castPose = CastPose.new(nil, true, clips)
 local hitReaction = HitReaction.new()
 local locomotion = ClassLocomotion.new({ isActing = function(character: Model): boolean
     local owner = Players:GetPlayerFromCharacter(character)
@@ -45,12 +55,9 @@ local reactionConnections: { RBXScriptConnection } = {}
 local function observeReaction(remoteEvent: RemoteEvent)
     table.insert(reactionConnections, remoteEvent.OnClientEvent:Connect(function(event: any) hitReaction.hit(event) end))
 end
-local remote = ReplicatedStorage:WaitForChild("ArrowRemote", 15)
-assert(remote and remote:IsA("RemoteEvent"), "Combat test server did not start; check Server Output.")
 local gui = player:WaitForChild("PlayerGui") :: PlayerGui
 observeReaction(remote)
 local arrowEffects = Effects.new(castPose)
-local experiment = ReplicatedStorage:GetAttribute("LivingMagicExperiment") == true
 local stop = Controller.start(player, remote, Hud.new(gui), arrowEffects, Input.bind, experiment)
 local stopClass: (() -> ())? = nil
 local stopMelee: (() -> ())? = nil

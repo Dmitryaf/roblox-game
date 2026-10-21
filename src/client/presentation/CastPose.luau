@@ -5,8 +5,8 @@ local RunService = game:GetService("RunService")
 local CastPose = {}
 type AnimationJoint = Motor6D | AnimationConstraint
 type Joint = { motor: AnimationJoint, rest: CFrame, raised: Vector3, charge: Vector3, focus: Vector3, release: Vector3,
-	breath: Vector3, lastBase: CFrame?, lastApplied: CFrame? }
-type Pose = { character: Model, joints: { Joint }, started: number, release: number, life: any, preview: boolean?, requestId: number?, timeline: any? }
+	breath: Vector3, aimFocus: Vector3, aimRelease: Vector3, lastBase: CFrame?, lastApplied: CFrame? }
+type Pose = { character: Model, joints: { Joint }, started: number, release: number, life: any, preview: boolean?, requestId: number?, timeline: any?, native: any? }
 local RELEASE = 0.05
 local RECOVERY = 0.4
 local function radians(x: number, y: number, z: number): Vector3 return Vector3.new(math.rad(x), math.rad(y), math.rad(z)) end
@@ -14,13 +14,16 @@ local function smooth(t: number): number t = math.clamp(t, 0, 1); return t * t *
 local function setTransform(joint: AnimationJoint, value: CFrame)
 	if joint:IsA("Motor6D") then joint.Transform = value else (joint :: AnimationConstraint).Transform = value end
 end
-function CastPose.new(clock: (() -> number)?, manualFrames: boolean?)
+function CastPose.new(clock: (() -> number)?, manualFrames: boolean?, clips: Instance?)
+    local Native: any = if clips then require(script.Parent.NativePoseSampler) else nil
+    local NativeTiming: any = if clips then require(script.Parent.NativePoseTiming) else nil
 	local readClock = clock or function(): number return workspace:GetServerTimeNow() end
 	local poses: { [number]: Pose } = {}
 	local pose = {}
 	function pose.stop(owner: number)
 		local current = poses[owner]
 		if current then
+			if current.native then current.native.destroy() end
 			for _, joint in current.joints do
 				-- Animator may have written a new pose since our last update. Preserve that value.
 				if joint.motor.Parent and joint.lastApplied and joint.motor.Transform == joint.lastApplied and joint.lastBase then
@@ -52,6 +55,10 @@ function CastPose.new(clock: (() -> number)?, manualFrames: boolean?)
 		local joints: { Joint } = {}
 		local descendants = character:GetDescendants()
 		local function add(names: { string }, raised: Vector3, charge: Vector3, released: Vector3, focus: Vector3?, breath: Vector3?)
+			local aimFocus = if names[1] == "Waist" then Vector3.new(0, yaw * 0.25, 0)
+				else if names[1] == "Neck" then Vector3.new(pitch * 0.55, yaw * 0.65, 0) else Vector3.zero
+			local aimRelease = if names[1] == "Neck" then aimFocus
+				else if names[1] == "RightShoulder" then Vector3.new(pitch, yaw, 0) else Vector3.zero
 			for _, candidate in descendants do
 				if not candidate:IsA("Motor6D") and not candidate:IsA("AnimationConstraint") then continue end
 				for _, name in names do
@@ -60,7 +67,7 @@ function CastPose.new(clock: (() -> number)?, manualFrames: boolean?)
 					-- The attachment frame is the upgraded rig's read-only equivalent of C0.
 					local rest = if candidate:IsA("Motor6D") then candidate.C0.Rotation else if attachment then attachment.CFrame.Rotation else CFrame.identity
 					table.insert(joints, { motor = candidate, rest = rest, raised = raised, charge = charge, focus = focus or charge,
-						release = released, breath = breath or Vector3.zero })
+						release = released, breath = breath or Vector3.zero, aimFocus = aimFocus, aimRelease = aimRelease })
 					return
 				end
 			end
@@ -80,6 +87,8 @@ function CastPose.new(clock: (() -> number)?, manualFrames: boolean?)
 		add({ "RightWrist" }, radians(-8, 0, 6), radians(-16, -8, 12), radians(17, 0, -5))
 		add({ "LeftWrist" }, radians(-8, 0, -6), radians(-16, 8, -12), radians(-4, 0, -6))
 		poses[owner] = { character = character, joints = joints, started = math.min(startedAt or readClock(), release - 0.06), release = release, life = character:GetAttribute("CombatLife") }
+		local clip = if clips then clips:FindFirstChild("WarlockCast") else nil
+		if clip and clip:IsA("AnimationClip") then poses[owner].native = Native.new(character, clip) end
 	end
     function pose.preview(owner: number, requestId: number, life: number, direction: Vector3): boolean
         if poses[owner] then return false end
@@ -120,10 +129,20 @@ function CastPose.new(clock: (() -> number)?, manualFrames: boolean?)
             end
         end
     end
+    function pose.preparePose(now: number)
+        pose.step(now)
+        for _, current in poses do
+            if current.native then
+                current.native.prepare(NativeTiming.time(now, current.started, current.release,
+                    current.release + RELEASE + RECOVERY, 0.708333313, 1.20833337, current.timeline))
+            end
+        end
+    end
     function pose.afterPose(now: number)
 
 		pose.step(now)
 		for _, current in poses do
+			if current.native then current.native.capture() end
 			local preparing = now < current.release
 			local progress = if current.timeline and preparing then current.timeline.progress(now)
                 else math.clamp((now - current.started) / math.max(0.06, current.release - current.started), 0, 1)
@@ -143,15 +162,26 @@ function CastPose.new(clock: (() -> number)?, manualFrames: boolean?)
 				-- Unanimated joints retain our previous value; remove that overlay before applying the next.
 				if joint.lastApplied and base == joint.lastApplied and joint.lastBase then base = joint.lastBase end
 				local parentRotation = CFrame.Angles(angles.X, angles.Y, angles.Z)
-				local localRotation = joint.rest:Inverse() * parentRotation * joint.rest
+				local localRotation = if current.native then current.native.sample(joint.motor) or CFrame.identity
+					else joint.rest:Inverse() * parentRotation * joint.rest
+				if current.native then
+					local aim = if preparing then joint.aimFocus * focus
+						else joint.aimFocus:Lerp(joint.aimRelease, snap) * recovery
+					localRotation = joint.rest:Inverse() * CFrame.Angles(aim.X, aim.Y, aim.Z) * joint.rest * localRotation
+				end
 				setTransform(joint.motor, localRotation * base)
 				joint.lastBase, joint.lastApplied = base, joint.motor.Transform
 			end
 		end
     end
     local simulation: RBXScriptConnection? = nil
+    local animation: RBXScriptConnection? = nil
+    if not manualFrames then animation = RunService.PreAnimation:Connect(function()
+        pose.beforePose(); pose.preparePose(readClock())
+    end) end
     if not manualFrames then simulation = RunService.PreSimulation:Connect(function() pose.afterPose(readClock()) end) end
 	function pose.destroy()
+        if animation then animation:Disconnect() end
         if simulation then simulation:Disconnect() end
 		for owner in poses do pose.stop(owner) end
 	end

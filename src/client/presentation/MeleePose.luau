@@ -9,7 +9,7 @@ local MeleePose = {}
 type Motor = Motor6D | AnimationConstraint
 type Joint = { motor: Motor, rest: CFrame, keys: { Vector3 }, body: boolean, torso: boolean, base: CFrame?, applied: CFrame? }
 type Swing = { character: Model, humanoid: Humanoid, root: BasePart?, joints: { Joint }, started: number,
-    hitAt: number, expires: number, received: number, direction: Vector3?, facing: any, kind: string, id: number?, life: any, timeline: any?, preview: boolean?, requestId: number?, dashLead: number? }
+    hitAt: number, expires: number, received: number, direction: Vector3?, facing: any, kind: string, id: number?, life: any, timeline: any?, preview: boolean?, requestId: number?, dashLead: number?, native: any? }
 local function transform(motor: Motor, value: CFrame)
     if motor:IsA("Motor6D") then motor.Transform = value else (motor :: AnimationConstraint).Transform = value end
 end
@@ -19,7 +19,9 @@ local function restore(joint: Joint)
     end
     joint.applied = nil
 end
-function MeleePose.new(manualFrames: boolean?)
+function MeleePose.new(manualFrames: boolean?, clips: Instance?)
+    local Native: any = if clips then require(script.Parent.NativePoseSampler) else nil
+    local NativeTiming: any = if clips then require(script.Parent.NativePoseTiming) else nil
     local swings: { [number]: Swing } = {}
     local pose = {}
     function pose.stop(owner: number, expectedKind: string?, expectedId: number?)
@@ -29,6 +31,7 @@ function MeleePose.new(manualFrames: boolean?)
         if expectedId and swing.id ~= expectedId then return end
         for _, joint in swing.joints do restore(joint) end
         if swing.facing then swing.facing.destroy() end
+        if swing.native then swing.native.destroy() end
         swings[owner] = nil
     end
     local function collect(character: Model, channels: any): { Joint }
@@ -73,6 +76,8 @@ function MeleePose.new(manualFrames: boolean?)
             started = startedAt or hitAt - 0.3, hitAt = hitAt, expires = expiresAt or hitAt + 0.45,
             received = workspace:GetServerTimeNow(), kind = "melee", id = swingId, life = character:GetAttribute("CombatLife"),
             facing = if player == Players.LocalPlayer and direction then Facing.new(character, direction) else nil }
+        local clip = if clips then clips:FindFirstChild("WarriorStrike") else nil
+        if clip and clip:IsA("AnimationClip") then swings[owner].native = Native.new(character, clip) end
     end
     function pose.beginDash(owner: number, duration: number, direction: Vector3, dashId: number, requestId: number?)
         local current = swings[owner]
@@ -163,10 +168,20 @@ function MeleePose.new(manualFrames: boolean?)
     function pose.beforePose()
         for _, swing in swings do for _, joint in swing.joints do restore(joint) end end
     end
+    function pose.preparePose(now: number)
+        pose.step(now)
+        for _, swing in swings do
+            if swing.native then
+                swing.native.prepare(NativeTiming.time(now, swing.started, swing.hitAt, swing.expires,
+                    0.458333343, 1, swing.timeline))
+            end
+        end
+    end
     function pose.afterPose(now: number, delta: number)
 
         pose.step(now)
         for _, swing in swings do
+            if swing.native then swing.native.capture() end
             if swing.facing then swing.facing.step(now, swing.hitAt, delta) end
             local isDash = swing.kind == "dash"
             local isHeavy = swing.kind == "heavy"
@@ -202,7 +217,8 @@ function MeleePose.new(manualFrames: boolean?)
                     local localDirection = swing.root.CFrame:VectorToObjectSpace(swing.direction)
                     angles = Vector3.new(localDirection.Z * math.abs(angles.X), angles.Y, angles.Z - localDirection.X * math.abs(angles.X) * 0.7)
                 end
-                local rotation = joint.rest:Inverse() * CFrame.Angles(angles.X, angles.Y, angles.Z) * joint.rest
+                local rotation = if swing.native then swing.native.sample(joint.motor) or CFrame.identity
+                    else joint.rest:Inverse() * CFrame.Angles(angles.X, angles.Y, angles.Z) * joint.rest
                 local target: CFrame
                 if joint.body then
                     local amplitude = if running and not isDash then (if isHeavy then 0.75 else 0.5) else 1
@@ -222,7 +238,9 @@ function MeleePose.new(manualFrames: boolean?)
     local animation: RBXScriptConnection? = nil
     local simulation: RBXScriptConnection? = nil
     if not manualFrames then
-        animation = RunService.PreAnimation:Connect(pose.beforePose)
+        animation = RunService.PreAnimation:Connect(function()
+            pose.beforePose(); pose.preparePose(workspace:GetServerTimeNow())
+        end)
         simulation = RunService.PreSimulation:Connect(function(delta: number) pose.afterPose(workspace:GetServerTimeNow(), delta) end)
     end
     function pose.destroy()
