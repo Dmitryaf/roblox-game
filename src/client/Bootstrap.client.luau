@@ -10,6 +10,7 @@ local MatchController = require(script.Parent.controllers.MatchController)
 local HandsHud = require(script.Parent.presentation.HandsHud)
 local HandsEffects = require(script.Parent.presentation.HandsEffects)
 local CoverEffects = require(script.Parent.presentation.CoverEffects)
+local LivingInteractionEffects = require(script.Parent.presentation.LivingInteractionEffects)
 local HandsInput = require(script.Parent.input.HandsInput)
 local HandsController = require(script.Parent.controllers.HandsController)
 local RunService = game:GetService("RunService")
@@ -52,6 +53,10 @@ local locomotion = ClassLocomotion.new({ isActing = function(character: Model): 
 end })
 local layers = PoseLayers.new({locomotion, warriorPose, castPose, hitReaction})
 local reactionConnections: { RBXScriptConnection } = {}
+local interactionFeedback = if experiment then LivingInteractionEffects.new() else nil
+if interactionFeedback then
+    table.insert(reactionConnections, remote.OnClientEvent:Connect(interactionFeedback.arrow))
+end
 local function observeReaction(remoteEvent: RemoteEvent)
     table.insert(reactionConnections, remoteEvent.OnClientEvent:Connect(function(event: any) hitReaction.hit(event) end))
 end
@@ -86,7 +91,7 @@ if ReplicatedStorage:GetAttribute("MatchEnabled") == true then
     assert(handsRemote and handsRemote:IsA("RemoteEvent"), "Hands server did not initialize")
     local handsPose = { begin = arrowEffects.prepare, stop = arrowEffects.stopCast }
     stopHands = HandsController.start(player, handsRemote, HandsHud.new(gui, experiment),
-        if experiment then CoverEffects.new(handsPose) else HandsEffects.new(handsPose), HandsInput.bind, experiment)
+        if experiment then CoverEffects.new(handsPose, interactionFeedback) else HandsEffects.new(handsPose), HandsInput.bind, experiment)
 end
 local stopMatch: (() -> ())? = nil
 local matchRemote = ReplicatedStorage:WaitForChild("MatchRemote", 5)
@@ -96,6 +101,7 @@ end
 script.Destroying:Connect(function()
     layers.destroy()
     for _, connection in reactionConnections do connection:Disconnect() end
+    if interactionFeedback then interactionFeedback.destroy() end
     hitReaction.destroy(); castPose.destroy(); locomotion.destroy()
 	dashMotion.destroy()
 	appearanceStep:Disconnect(); warrior.destroy()
