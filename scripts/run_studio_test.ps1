@@ -11,6 +11,7 @@ param(
     [switch]$Feedback,
     [switch]$FeedbackBaseline,
     [switch]$Transfer,
+    [switch]$Living,
     [switch]$Arena,
     [switch]$ArenaStaged,
     [switch]$Overlap,
@@ -23,12 +24,13 @@ if (-not (Test-Path -LiteralPath $StudioExe)) { throw 'Studio executable not fou
 $taskRobloxRoot = Split-Path (Split-Path (Split-Path $StudioExe -Parent) -Parent) -Parent
 $taskPluginDir = Join-Path $taskRobloxRoot 'Plugins'
 $taskLogDir = Join-Path $taskRobloxRoot 'logs'
-if (([int]$Match.IsPresent + [int]$Multiplayer.IsPresent + [int]$Hands.IsPresent + [int]$Warrior.IsPresent + [int]$Dash.IsPresent + [int]$Contact.IsPresent + [int]$Heavy.IsPresent + [int]$Mixed.IsPresent + [int]$Feedback.IsPresent + [int]$FeedbackBaseline.IsPresent + [int]$Transfer.IsPresent + [int]$Arena.IsPresent + [int]$ArenaStaged.IsPresent + [int]$Overlap.IsPresent) -gt 1) { throw 'Choose one runtime fixture' }
-if (($Warrior -or $Dash -or $Contact -or $Heavy -or $Mixed -or $Feedback -or $FeedbackBaseline -or $Transfer) -and $Clients -ne 2) { throw 'Warrior/dash/contact/heavy/mixed fixtures require two clients' }
+if (([int]$Match.IsPresent + [int]$Multiplayer.IsPresent + [int]$Hands.IsPresent + [int]$Warrior.IsPresent + [int]$Dash.IsPresent + [int]$Contact.IsPresent + [int]$Heavy.IsPresent + [int]$Mixed.IsPresent + [int]$Feedback.IsPresent + [int]$FeedbackBaseline.IsPresent + [int]$Transfer.IsPresent + [int]$Living.IsPresent + [int]$Arena.IsPresent + [int]$ArenaStaged.IsPresent + [int]$Overlap.IsPresent) -gt 1) { throw 'Choose one runtime fixture' }
+if (($Warrior -or $Dash -or $Contact -or $Heavy -or $Mixed -or $Feedback -or $FeedbackBaseline -or $Transfer -or $Living) -and $Clients -ne 2) { throw 'Warrior/dash/contact/heavy/mixed fixtures require two clients' }
 if (($Arena -or $ArenaStaged) -and $Clients -ne 6) { throw 'Arena combat fixture requires six real clients' }
 if ($Overlap -and $Clients -ne 4) { throw 'Overlap fixture requires four real clients' }
 if ($Clients -eq 4 -and -not $Overlap) { throw 'Four-client runner currently supports only overlap' }
-if ($ArenaStaged) { python scripts/prepare_studio_test.py --arena-staged --clients $Clients --lag-ms $LagMs }
+if ($Living) { python scripts/prepare_studio_test.py --living --clients $Clients --lag-ms $LagMs }
+elseif ($ArenaStaged) { python scripts/prepare_studio_test.py --arena-staged --clients $Clients --lag-ms $LagMs }
 elseif ($FeedbackBaseline) { python scripts/prepare_studio_test.py --feedback-baseline --clients $Clients --lag-ms $LagMs }
 elseif ($Arena) { python scripts/prepare_studio_test.py --arena --clients $Clients --lag-ms $LagMs }
 elseif ($Transfer) { python scripts/prepare_studio_test.py --transfer --clients $Clients --lag-ms $LagMs }
@@ -54,7 +56,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Could not build test plugin' }
 if ($LASTEXITCODE -ne 0) { throw 'Could not map Studio test' }
 Push-Location build
 try {
-    $taskTestSources = if ($Multiplayer -or $Match -or $Hands -or $Warrior -or $Dash -or $Contact -or $Heavy -or $Mixed -or $Feedback -or $FeedbackBaseline -or $Transfer -or $Overlap -or $Arena -or $ArenaStaged) { '../tests/studio' } else { @('../tests/studio/world.luau', '../tests/studio/match_world.luau', '../tests/studio/dash_world.luau', '../tests/studio/movement_contact_world.luau', '../tests/studio/slow_world.luau', '../tests/studio/area_placement_world.luau') }
+    $taskTestSources = if ($Multiplayer -or $Match -or $Hands -or $Warrior -or $Dash -or $Contact -or $Heavy -or $Mixed -or $Feedback -or $FeedbackBaseline -or $Transfer -or $Living -or $Overlap -or $Arena -or $ArenaStaged) { '../tests/studio' } else { @('../tests/studio/world.luau', '../tests/studio/match_world.luau', '../tests/studio/dash_world.luau', '../tests/studio/movement_contact_world.luau', '../tests/studio/slow_world.luau', '../tests/studio/area_placement_world.luau') }
     & ../.tools/luau-lsp/luau-lsp.exe analyze --platform roblox --sourcemap studio-sourcemap.json --definitions ../.tools/roblox.d.luau $taskTestSources
     if ($LASTEXITCODE -ne 0) { throw 'Studio test type check failed' }
 } finally { Pop-Location }

@@ -132,7 +132,9 @@ local ok, problem = xpcall(function()
 	local arrow = owned(cast(warlock, "arrow", Vector3.new(0, 1, -30)).state, warlock)
 	assert(math.abs(arrow.launchAt - arrow.startedAt - 0.7) < 0.001
 		and math.abs(arrow.expiresAt - arrow.launchAt - 2.2) < 0.001 and arrow.speed == 58, "Mixed scenario changed the accepted arrow contract")
-	waitFor(function() return workspace:GetServerTimeNow() >= arrow.launchAt + 0.05 end, 2, "Slowed warlock arrow did not reach its launch time")
+	-- The landing is three studs behind the arrow. Give it enough travel for the
+	-- unchanged >=5-stud assertion, without depending on input/network overhead.
+	waitFor(function() return workspace:GetServerTimeNow() >= arrow.launchAt + 0.18 end, 2, "Slowed warlock arrow did not reach its travel time")
 	local teleported = cast(warlock, "teleport", nil)
 	slowedCaster = nil
 	assert(slowedInputs.cast ~= nil and slowedInputs.teleport ~= nil and math.abs(slowedInputs.cast.speed - 9.6) < 0.001

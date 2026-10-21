@@ -211,6 +211,10 @@ function Driver.new(player: Player)
 		local key = if (ability == "teleport" or ability == "transfer") then "arrow" else ability
 		assert(remotes[key], "Unknown ability " .. ability)
 		local function perform(input: any, mouse: Vector2): any
+			-- Optional server-clock schedule for timing-sensitive multi-client fixtures.
+			if type(data.at) == "number" then
+				waitFor(function() return workspace:GetServerTimeNow() >= data.at end, 3, "Scheduled input time did not arrive")
+			end
 			local before, token, sentAt = latest[key], life(), workspace:GetServerTimeNow()
 			tap(input, ability, mouse)
 			local item = waitReply(key, before, token); local reply = item.event
