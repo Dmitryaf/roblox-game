@@ -73,7 +73,7 @@ function Tests.run()
     end
     local ok, problem = xpcall(function()
         for _, spec in {
-            {name = "WarriorStrike", windup = 0.27, contact = 0.458333343},
+            {name = "WarriorStrike", windup = 0.375, contact = 0.458333343},
             {name = "WarlockCast", windup = 0.541666687, contact = 0.708333313},
         } do
             local clip = clips:FindFirstChild(spec.name)
@@ -130,6 +130,16 @@ function Tests.run()
             assert(math.abs(supportPosition.X) <= 0.15001 and math.abs(supportPosition.Z) <= 0.15001
                 and supportPosition.Y >= -0.50001 and supportPosition.Y <= 0.10001, "Visual root support escaped its translation limits")
             if spec.name == "WarriorStrike" then assert(supportPosition.Y < -0.1, "Authored warrior crouch lost visual pelvis support") end
+            if spec.name == "WarlockCast" then
+                for _, name in {"LeftHip", "RightHip"} do
+                    local value = active.sample(joints[name])
+                    assert(value and angle(value) > math.rad(5), "Authored cast brace was masked: " .. name)
+                end
+                assert(angle(windup:ToObjectSpace(seek(0.633333325))) < 0.01, "Cast lost its authored focus hold")
+            else
+                seek(0.541666687)
+                assert((active.support(visualRoot) :: CFrame).Position.Y < -0.1, "Sparse follow-through key reset pelvis support")
+            end
             local contact = seek(spec.contact)
             assert(math.max(angle(windup), angle(contact)) > math.rad(15), "Native clip produced no meaningful arm movement")
             assert(angle(windup:ToObjectSpace(contact)) > math.rad(5), "Paused native track ignored seek across contact")
@@ -154,7 +164,11 @@ function Tests.run()
                 if joint then assert(active.sample(joint) == nil, "Sampler exposed physical root motion: " .. name) end
             end
             assert(active.support(shoulder) == nil and active.support(joints.LeftHip) == nil, "Support port exposed non-root joints")
-            seek(10) -- The sampler clamps to the native clip's final evaluated frame.
+            assert(angle(seek(10)) < 0.01, "Native recovery retained arm tension")
+            for _, name in {"LeftHip", "RightHip"} do
+                local value = active.sample(joints[name])
+                assert(value and angle(value) < 0.01, "Native recovery retained leg brace: " .. name)
+            end
             local finalSupport = active.support(visualRoot)
             assert(finalSupport and finalSupport.Position.Magnitude < 0.01 and angle(finalSupport) < 0.00001,
                 "Native recovery retained visual root support")
