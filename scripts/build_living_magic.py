@@ -9,8 +9,8 @@ project["name"] = "LivingMagic"
 project["tree"]["ServerStorage"] = {"$className": "ServerStorage", "$attributes": {"LivingMagicExperiment": True}}
 project["tree"]["ReplicatedStorage"]["NativeCombatClips"] = {
     "$className": "Folder",
-    "WarriorStrike": {"$path": "assets/animations/WarriorStrike_Draft02.rbxmx"},
-    "WarlockCast": {"$path": "assets/animations/WarlockCast_Draft01.rbxmx"},
+    "WarriorStrike": {"$path": "assets/animations/WarriorStrike_Draft03.rbxmx"},
+    "WarlockCast": {"$path": "assets/animations/WarlockCast_Draft02.rbxmx"},
 }
 
 def absolute_paths(value):

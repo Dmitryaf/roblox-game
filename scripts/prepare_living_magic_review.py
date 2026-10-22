@@ -53,8 +53,8 @@ else:
         project['tree']['ServerStorage']['$attributes']['LivingMagicExperiment'] = True
         project['tree']['ReplicatedStorage']['NativeCombatClips'] = {
             '$className': 'Folder',
-            'WarriorStrike': {'$path': 'assets/animations/WarriorStrike_Draft02.rbxmx'},
-            'WarlockCast': {'$path': 'assets/animations/WarlockCast_Draft01.rbxmx'},
+            'WarriorStrike': {'$path': 'assets/animations/WarriorStrike_Draft03.rbxmx'},
+            'WarlockCast': {'$path': 'assets/animations/WarlockCast_Draft02.rbxmx'},
         }
     project['tree']['ServerScriptService']['LivingReview'] = {'$path': 'tests/studio/living_magic/baseline.server.luau'}
     project['tree']['StarterPlayer']['StarterPlayerScripts']['LivingReview'] = {'$path': 'tests/studio/living_magic/baseline.client.luau'}

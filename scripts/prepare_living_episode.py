@@ -28,8 +28,8 @@ project['tree']['ReplicatedStorage'].update({
     'MixedClassDriver': {'$path': 'tests/studio/client/DashDriver.luau'},
     'NativeCombatClips': {
         '$className': 'Folder',
-        'WarriorStrike': {'$path': 'assets/animations/WarriorStrike_Draft02.rbxmx'},
-        'WarlockCast': {'$path': 'assets/animations/WarlockCast_Draft01.rbxmx'},
+        'WarriorStrike': {'$path': 'assets/animations/WarriorStrike_Draft03.rbxmx'},
+        'WarlockCast': {'$path': 'assets/animations/WarlockCast_Draft02.rbxmx'},
     },
 })
 project['tree']['ServerStorage'] = {'$attributes': {

@@ -105,8 +105,8 @@ if living:
     project["tree"]["ReplicatedStorage"]["LivingNativeObserver"] = {"$path": str(ROOT / "tests/studio/living_magic/native_observer.luau")}
     project["tree"]["ReplicatedStorage"]["NativeCombatClips"] = {
         "$className": "Folder",
-        "WarriorStrike": {"$path": "assets/animations/WarriorStrike_Draft02.rbxmx"},
-        "WarlockCast": {"$path": "assets/animations/WarlockCast_Draft01.rbxmx"},
+        "WarriorStrike": {"$path": "assets/animations/WarriorStrike_Draft03.rbxmx"},
+        "WarlockCast": {"$path": "assets/animations/WarlockCast_Draft02.rbxmx"},
     }
     project["tree"]["ServerStorage"]["$attributes"].update({"MixedTest": True, "LivingMagicExperiment": True})
     project["tree"]["ServerStorage"]["LivingCoverWorldTests"] = {"$path": str(ROOT / "tests/studio/living_magic/cover_world.luau")}
